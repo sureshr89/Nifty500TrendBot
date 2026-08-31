@@ -43,8 +43,24 @@ def market():
     state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     client = DhanClient()
     ltp, pdc = fetch_nifty500_index(client)
-    mode = "BUY" if ltp > pdc else "SELL" if ltp < pdc else "NEUTRAL"
-    state["market"] = {"ltp": ltp, "pdc": pdc, "day_pct": (ltp-pdc)/pdc*100 if pdc else 0, "mode": mode}
+    day_pct = (ltp - pdc) / pdc * 100 if pdc else 0
+    previous_market = state.get("market", {})
+    ad_ratio = float(previous_market.get("ad_ratio", 1.0))
+    if day_pct > 0 and ad_ratio > 1:
+        mode = "BUY"
+    elif day_pct < 0 and ad_ratio < 1:
+        mode = "SELL"
+    else:
+        mode = "NEUTRAL"
+    state["market"] = {
+        "ltp": ltp,
+        "pdc": pdc,
+        "day_pct": day_pct,
+        "advances": previous_market.get("advances", 0),
+        "declines": previous_market.get("declines", 0),
+        "ad_ratio": ad_ratio,
+        "mode": mode,
+    }
     state.setdefault("health", {})
     state["health"].update({"worker_status": "ok", "last_scan_ist": now(), "last_error": ""})
     write_state(state)
