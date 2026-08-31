@@ -53,7 +53,10 @@ c3.metric("NIFTY 500 LTP", market.get("ltp", "—"))
 c4.metric("A/D Ratio", market.get("ad_ratio", "—"))
 c5.metric("Market Mode", market.get("mode", "NEUTRAL"))
 
-st.caption(f"PDC: {market.get('pdc', '—')} | Day %: {market.get('day_pct', '—')}")
+st.caption(
+    f"PDC: {market.get('pdc', '—')} | Day %: {market.get('day_pct', '—')} | "
+    f"Advances: {market.get('advances', '—')} | Declines: {market.get('declines', '—')}"
+)
 
 def show_set(title, rows):
     st.subheader(title)
