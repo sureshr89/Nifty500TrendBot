@@ -107,7 +107,7 @@ def trend_check(state):
 
     if "trend_runtime" not in st.session_state:
         st.session_state.trend_runtime = {"trades": [], "last_ltp": {}}
-    runtime = st.session_state.s1_runtime
+    runtime = st.session_state.trend_runtime
     trades = runtime["trades"]
     open_trade = next((t for t in trades if t["status"] == "OPEN"), None)
     dt = now_ist()
@@ -252,7 +252,7 @@ try:
 except Exception as exc:
     state = {}
     market = {}
-    trades = st.session_state.get("s1_runtime", {}).get("trades", [])
+    trades = st.session_state.get("trend_runtime", {}).get("trades", [])
     live_status = "🔴 ERROR"
     st.error(str(exc))
 
