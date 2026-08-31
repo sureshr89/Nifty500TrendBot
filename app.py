@@ -209,7 +209,7 @@ def trend_check(state):
             trade.update({"status": "CLOSED", "exit_price": px, "exit_reason": reason, "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # New S1/S2/S3 entries: maximum 4 positions total, one OPEN per strategy.
+    # New S1/S2/S3/S4 entries: maximum 4 positions total, one OPEN per strategy.
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     if len(open_trades) < 4 and in_entry_window(dt) and mode in ("BUY", "SELL"):
         candidates = buy_rows if mode == "BUY" else sell_rows
@@ -279,7 +279,7 @@ def trend_check(state):
 
                     # S4 BUY: open inside previous-day range, then break above PDH.
                     if not entry_made and "S4" not in open_strategies:
-                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp < pdh and q["ltp"] >= pdh
+                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
                         if s4:
                             sl = (pdh + pdl) / 2
                             risk = q["ltp"] - sl
@@ -314,7 +314,7 @@ def trend_check(state):
 
                     # S4 SELL: open inside previous-day range, then break below PDL.
                     if not entry_made and "S4" not in open_strategies:
-                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp > pdl and q["ltp"] <= pdl
+                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                         if s4:
                             sl = (pdh + pdl) / 2
                             risk = sl - q["ltp"]
@@ -376,7 +376,7 @@ m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
 st.caption(f"PDC: {market.get('pdc', '—')} • Breadth: {market.get('valid_breadth_stocks', 0)} valid quotes • Adv: {market.get('advances', 0)} • Dec: {market.get('declines', 0)} • Unch: {market.get('unchanged', 0)} • Last live check: {now_ist():%H:%M:%S IST}")
 
 st.divider()
-st.subheader("🎯 Strategy Status — S1 / S2 / S3")
+st.subheader("🎯 Strategy Status — S1 / S2 / S3 / S4")
 s1a, s1b, s1c = st.columns(3)
 s1a.metric("Entry Window", "09:30–13:00")
 s1b.metric("Pullback", "0.15%")
