@@ -86,6 +86,16 @@ def trend_check(state):
     market = dict(state.get("market", {}))
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
+    # Attach fresh Dhan LTP to stock-set rows for display and trigger comparison.
+    all_ids = [x.get("SecurityId") for x in buy_rows + sell_rows if x.get("SecurityId") is not None]
+    live_quotes = client.quotes(all_ids)
+    for stock in buy_rows + sell_rows:
+        try:
+            q = live_quotes.get(int(stock.get("SecurityId")))
+            if q:
+                stock["LTP"] = q["ltp"]
+        except (TypeError, ValueError):
+            pass
     ad_ratio = float(market.get("ad_ratio", 1.0))
     ltp = market.get("ltp")
     pdc = market.get("pdc")
