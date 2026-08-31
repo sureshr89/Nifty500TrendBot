@@ -90,12 +90,19 @@ def _history(client, security_id):
     data = data.get("data", data)
     if not isinstance(data, dict):
         return pd.DataFrame()
-    frame = pd.DataFrame({"timestamp": data.get("timestamp", []), "close": data.get("close", [])})
+    frame = pd.DataFrame({
+        "timestamp": data.get("timestamp", []),
+        "open": data.get("open", []),
+        "high": data.get("high", []),
+        "low": data.get("low", []),
+        "close": data.get("close", []),
+    })
     if frame.empty:
         return frame
     frame["date"] = pd.to_datetime(frame["timestamp"], unit="s", errors="coerce")
-    frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
-    return frame.dropna().sort_values("date").reset_index(drop=True)
+    for col in ("open", "high", "low", "close"):
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    return frame.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
 
 
 def _return(frame, days):
@@ -150,6 +157,45 @@ def fetch_nifty500_index(client):
     return float(ltp), float(pdc)
 
 
+def fetch_equity_ohlc(client, security_ids):
+    ids = [str(int(x)) for x in security_ids]
+    if not ids:
+        return {}
+    data = client.post("/marketfeed/ohlc", {"NSE_EQ": ids})
+    quotes = ((data.get("data") or {}).get("NSE_EQ") or {})
+    result = {}
+    for sid in ids:
+        q = quotes.get(sid, {})
+        ohlc = q.get("ohlc") or {}
+        ltp = q.get("last_price")
+        if ltp is None:
+            continue
+        result[int(sid)] = {
+            "ltp": float(ltp),
+            "open": float(ohlc.get("open", ltp)),
+            "high": float(ohlc.get("high", ltp)),
+            "low": float(ohlc.get("low", ltp)),
+        }
+    return result
+
+
+def add_s1_levels(frame):
+    out = frame.copy()
+    pdh, pdl = [], []
+    client = DhanClient()
+    for _, stock in out.iterrows():
+        hist = _history(client, stock["SecurityId"])
+        if len(hist) < 2:
+            pdh.append(None); pdl.append(None)
+        else:
+            prev = hist.iloc[-2]
+            pdh.append(float(prev["high"]))
+            pdl.append(float(prev["low"]))
+    out["PDH"] = pdh
+    out["PDL"] = pdl
+    return out.dropna(subset=["PDH", "PDL"]).copy()
+
+
 def scan_nifty500():
     client = DhanClient()
     universe = load_nifty500_universe()
@@ -165,6 +211,7 @@ def scan_nifty500():
         raise RuntimeError("No stock trends could be calculated")
 
     frame = pd.DataFrame(rows)
+    frame = add_s1_levels(frame)
     periods = ["1Y Return %", "6M Return %", "1M Return %", "1W Return %"]
     frame["Trend"] = "MIXED"
     frame.loc[(frame[periods] > 0).all(axis=1), "Trend"] = "BULLISH"
