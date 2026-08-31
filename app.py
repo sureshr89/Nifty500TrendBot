@@ -7,6 +7,7 @@ When the Streamlit app is active, this app fetches fresh Dhan market data every
 
 import json
 import time
+import base64
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -91,6 +92,45 @@ def now_ist():
 def in_entry_window(dt):
     hhmm = dt.strftime("%H:%M")
     return "09:30" <= hhmm < "13:00"
+
+def _github_trade_state_url():
+    return f"https://api.github.com/repos/{REPO}/contents/paper_trades.json"
+
+def load_persisted_trades():
+    token = st.secrets.get("GITHUB_TOKEN")
+    if not token:
+        return None
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    response = requests.get(_github_trade_state_url(), headers=headers, params={"ref": "bot-state"}, timeout=15)
+    if response.status_code == 404:
+        return {"trades": [], "last_ltp": {}}
+    response.raise_for_status()
+    payload = response.json()
+    raw = base64.b64decode(payload["content"]).decode("utf-8")
+    data = json.loads(raw)
+    return {"trades": data.get("trades", []), "last_ltp": data.get("last_ltp", {}), "_sha": payload.get("sha")}
+
+def persist_trades(runtime):
+    token = st.secrets.get("GITHUB_TOKEN")
+    if not token:
+        return
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"}
+    current = requests.get(_github_trade_state_url(), headers=headers, params={"ref": "bot-state"}, timeout=15)
+    sha = None
+    if current.status_code == 200:
+        sha = current.json().get("sha")
+    elif current.status_code != 404:
+        current.raise_for_status()
+    data = {"trades": runtime.get("trades", []), "last_ltp": runtime.get("last_ltp", {})}
+    body = {
+        "message": "Persist paper trade state",
+        "content": base64.b64encode(json.dumps(data, separators=(",", ":")).encode("utf-8")).decode("ascii"),
+        "branch": "bot-state",
+    }
+    if sha:
+        body["sha"] = sha
+    response = requests.put(_github_trade_state_url(), headers=headers, json=body, timeout=15)
+    response.raise_for_status()
 
 def trend_check(state):
     client = DhanLiveClient()
@@ -181,7 +221,8 @@ def trend_check(state):
     market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 1, "breadth_valid": breadth_valid, "mode": mode})
 
     if "trend_runtime" not in st.session_state:
-        st.session_state.trend_runtime = {"trades": [], "last_ltp": {}}
+        persisted = load_persisted_trades()
+        st.session_state.trend_runtime = persisted if persisted is not None else {"trades": [], "last_ltp": {}}
     runtime = st.session_state.trend_runtime
     trades = runtime["trades"]
     dt = now_ist()
@@ -325,6 +366,7 @@ def trend_check(state):
             if entry_made:
                 break
 
+    persist_trades(runtime)
     return market, runtime["trades"]
 
 # --------------------------- Professional mobile dashboard ---------------------------
