@@ -386,14 +386,17 @@ st.caption("S1 BUY: Open > PDH → Low ≤ PDH − 0.15% → reclaim PDH | S1 SE
 st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDH + 0.15% → break PDH")
 st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R\n\nS4 BUY: Open between PDL & PDH → break above PDH | S4 SELL: Open between PDL & PDH → break below PDL | S4 target = 1.25R")
 
-open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
-if open_trade:
-    st.success(f"OPEN • {open_trade.get('side')} • {open_trade.get('Symbol')}")
-    a,b,c1,d = st.columns(4)
-    a.metric("Entry", f"₹{open_trade.get('entry_price', 0):.2f}")
-    b.metric("SL", f"₹{open_trade.get('SL', 0):.2f}")
-    c1.metric("Target", f"₹{open_trade.get('target', 0):.2f}")
-    d.metric("Status", "OPEN")
+open_positions = [t for t in trades if t.get("status") == "OPEN"]
+if open_positions:
+    st.success(f"{len(open_positions)} OPEN POSITION(S) • Maximum 4")
+    for open_trade in open_positions:
+        st.markdown(f"**{open_trade.get('strategy')} • {open_trade.get('side')} • {open_trade.get('Symbol')}**")
+        a,b,c1,d,e = st.columns(5)
+        a.metric("Entry", f"₹{open_trade.get('entry_price', 0):.2f}")
+        b.metric("SL", f"₹{open_trade.get('SL', 0):.2f}")
+        c1.metric("Target", f"₹{open_trade.get('target', 0):.2f}")
+        d.metric("Qty", open_trade.get("quantity", 0))
+        e.metric("Risk", f"₹{open_trade.get('risk_amount', 0):.2f}")
 else:
     st.info("No open S1 / S2 / S3 / S4 paper position")
 
@@ -418,7 +421,7 @@ def show_set(title, rows, icon):
 
 st.divider()
 st.subheader("Stock Sets — Full Trend Qualification")
-st.caption("Every stock below shows the exact 1Y, 6M, 1M and 1W returns used to qualify it. S1/S2/S3 must select candidates only from the matching set.")
+st.caption("Every stock below shows the exact 1Y, 6M, 1M and 1W returns used to qualify it. S1/S2/S3/S4 must select candidates only from the matching set.")
 show_set("BUY SET", buy_rows, "🟢")
 show_set("SELL SET", sell_rows, "🔴")
 
