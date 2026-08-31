@@ -26,6 +26,7 @@ def premarket():
             "last_error": ""
         },
         "market": result["market"],
+        "classified": result["classified"].to_dict(orient="records"),
         "buy_set": result["buy_set"].to_dict(orient="records"),
         "sell_set": result["sell_set"].to_dict(orient="records"),
         "scan_errors": result["errors"],
