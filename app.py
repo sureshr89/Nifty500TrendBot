@@ -460,9 +460,21 @@ sector_breadth = market.get("sector_breadth", {})
 if sector_breadth:
     sector_rows = [{"Sector": s, **v} for s, v in sorted(sector_breadth.items())]
     sector_frame = pd.DataFrame(sector_rows)
-    with st.expander("🏢 Live Sector A/D Confirmation", expanded=False):
+    with st.expander("🏢 Live Sector A/D Confirmation", expanded=True):
         st.caption("BUY trades require the stock's Sector A/D > 1. SELL trades require the stock's Sector A/D < 1. Missing/neutral sector breadth blocks new entries.")
-        st.dataframe(sector_frame, use_container_width=True, hide_index=True)
+        st.dataframe(
+            sector_frame,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Sector": st.column_config.TextColumn("Sector", width="medium"),
+                "advances": st.column_config.NumberColumn("Adv", format="%d"),
+                "declines": st.column_config.NumberColumn("Dec", format="%d"),
+                "unchanged": st.column_config.NumberColumn("Unch", format="%d"),
+                "valid": st.column_config.NumberColumn("Valid", format="%d"),
+                "ad_ratio": st.column_config.NumberColumn("A/D Ratio", format="%.2f"),
+            },
+        )
 
 st.divider()
 st.subheader("🎯 Strategy Status — S1 / S2 / S3 / S4")
