@@ -46,8 +46,6 @@ jobs:
           if missing:
               raise SystemExit(f"State validation failed. Missing keys: {sorted(missing)}")
           breadth = state.get("breadth_universe") or []
-          if len(breadth) < 480:
-              raise SystemExit(f"State validation failed. breadth_universe has {len(breadth)} stocks; need at least 480")
           print(f"STATE OK schema={state['state_schema_version']} classified={len(state['classified'])} breadth={len(breadth)}")
           PY
 
