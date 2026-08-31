@@ -218,7 +218,8 @@ def trend_check(state):
                 "strategy": strategy, "side": side, "status": "OPEN",
                 "Symbol": stock["Symbol"], "SecurityId": sid,
                 "entry_price": q["ltp"], "PDH": float(stock["PDH"]),
-                "PDL": float(stock["PDL"]), "SL": sl, "target": target,
+                "PDL": float(stock["PDL"]), "PDC": float(stock.get("PDC", 0)),
+                "SL": sl, "target": target,
                 "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")
             })
 
@@ -227,15 +228,15 @@ def trend_check(state):
             q = quotes.get(sid)
             if not q:
                 continue
-            pdh, pdl = float(stock.get("PDH", 0)), float(stock.get("PDL", 0))
-            if pdh <= 0 or pdl <= 0:
+            pdh, pdl, pdc = float(stock.get("PDH", 0)), float(stock.get("PDL", 0)), float(stock.get("PDC", 0))
+            if pdh <= 0 or pdl <= 0 or pdc <= 0:
                 continue
             prev_ltp = runtime["last_ltp"].get(sid)
             entry_made = False
 
             if mode == "BUY":
                 # S1: Open > PDH, low 0.15% below PDH, reclaim PDH.
-                s1 = q["open"] > pdh and q["low"] <= pdh * 0.9985 and (prev_ltp is None or prev_ltp < pdh) and q["ltp"] >= pdh
+                s1 = q["open"] > pdh and q["low"] <= pdh * 0.9985 and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
                 if s1:
                     sl = (pdh + pdl) / 2
                     risk = q["ltp"] - sl
@@ -243,9 +244,9 @@ def trend_check(state):
                         open_position("S1", "BUY", stock, sid, q, sl, q["ltp"] + 2 * risk)
                         entry_made = True
 
-                # S2: Open between PDL/PDH, low 0.15% below PDL, reclaim PDL.
+                # S2: Open between PDL/PDH, low 0.15% below PDC, reclaim PDL.
                 if not entry_made:
-                    s2 = pdl < q["open"] < pdh and q["low"] <= pdl * 0.9985 and (prev_ltp is None or prev_ltp < pdl) and q["ltp"] >= pdl
+                    s2 = pdl < q["open"] < pdh and q["low"] <= pdc * 0.9985 and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
                     if s2:
                         sl = q["low"]
                         risk = q["ltp"] - sl
@@ -264,7 +265,7 @@ def trend_check(state):
                             entry_made = True
             else:
                 # S1: Open < PDL, high 0.15% above PDL, break below PDL.
-                s1 = q["open"] < pdl and q["high"] >= pdl * 1.0015 and (prev_ltp is None or prev_ltp > pdl) and q["ltp"] <= pdl
+                s1 = q["open"] < pdl and q["high"] >= pdl * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                 if s1:
                     sl = (pdh + pdl) / 2
                     risk = sl - q["ltp"]
@@ -272,9 +273,9 @@ def trend_check(state):
                         open_position("S1", "SELL", stock, sid, q, sl, q["ltp"] - 2 * risk)
                         entry_made = True
 
-                # S2: Open between PDL/PDH, high 0.15% above PDH, break below PDH.
+                # S2: Open between PDL/PDH, high 0.15% above PDC, break below PDL.
                 if not entry_made:
-                    s2 = pdl < q["open"] < pdh and q["high"] >= pdh * 1.0015 and (prev_ltp is None or prev_ltp > pdh) and q["ltp"] <= pdh
+                    s2 = pdl < q["open"] < pdh and q["high"] >= pdc * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                     if s2:
                         sl = q["high"]
                         risk = sl - q["ltp"]
