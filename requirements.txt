@@ -1,1 +1,4 @@
-pandas>=2.2,<3\nrequests>=2.32,<3\nstreamlit>=1.40,<2\nstreamlit-autorefresh>=1.0,<2\n
+pandas>=2.2,<3
+requests>=2.32,<3
+streamlit>=1.40,<2
+streamlit-autorefresh>=1.0,<2
