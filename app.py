@@ -6,6 +6,7 @@ When the Streamlit app is active, this app fetches fresh Dhan market data every
 """
 
 import json
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -44,14 +45,14 @@ class DhanLiveClient:
         }
 
     def post(self, path, payload):
-        response = requests.post(
-            "https://api.dhan.co/v2" + path,
-            headers=self.headers,
-            json=payload,
-            timeout=15,
-        )
-        response.raise_for_status()
-        return response.json()
+        url = "https://api.dhan.co/v2" + path
+        for attempt in range(3):
+            response = requests.post(url, headers=self.headers, json=payload, timeout=15)
+            if response.status_code == 429 and attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            response.raise_for_status()
+            return response.json()
 
     def quotes(self, security_ids, exchange_segment="NSE_EQ"):
         # Dhan expects numeric security IDs and the correct exchange-segment key.
@@ -147,14 +148,14 @@ def trend_check(state):
 
     # 14:55 mandatory square-off.
     if open_trade and dt.strftime("%H:%M") >= "14:55":
-        q = client.quotes([open_trade["SecurityId"]]).get(int(open_trade["SecurityId"]))
+        q = live_quotes.get(int(open_trade["SecurityId"]))
         if q:
             open_trade.update({"status": "CLOSED", "exit_price": q["ltp"], "exit_reason": "AUTO_SQUARE_OFF", "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
             open_trade = None
 
     # SL / target monitoring.
     if open_trade:
-        q = client.quotes([open_trade["SecurityId"]]).get(int(open_trade["SecurityId"]))
+        q = live_quotes.get(int(open_trade["SecurityId"]))
         if q:
             px = q["ltp"]
             if open_trade["side"] == "BUY":
@@ -169,8 +170,7 @@ def trend_check(state):
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     if not open_trade and in_entry_window(dt) and mode in ("BUY", "SELL"):
         candidates = buy_rows if mode == "BUY" else sell_rows
-        ids = [x["SecurityId"] for x in candidates]
-        quotes = client.quotes(ids)
+        quotes = live_quotes
 
         def open_position(strategy, side, stock, sid, q, sl, target):
             trades.append({
