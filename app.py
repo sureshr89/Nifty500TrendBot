@@ -147,8 +147,16 @@ def trend_check(state):
     advances = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] > resolved_pdc[sid])
     declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < resolved_pdc[sid])
     unchanged = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] == resolved_pdc[sid])
-    breadth_valid = valid_count >= 480
-    ad_ratio = (advances / declines) if breadth_valid and declines > 0 else None
+    # Use every valid Dhan quote available. Do not block A/D behind an arbitrary
+    # 480-stock threshold; the dashboard should show live breadth whenever Dhan
+    # returns enough advancing/declining data to calculate it.
+    breadth_valid = valid_count > 0
+    if declines > 0:
+        ad_ratio = advances / declines
+    elif advances > 0:
+        ad_ratio = float("inf")
+    else:
+        ad_ratio = None
     ltp = market.get("ltp")
     pdc = market.get("pdc")
 
@@ -165,7 +173,7 @@ def trend_check(state):
         day_pct = market.get("day_pct", 0)
 
     mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
-    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 480, "breadth_valid": breadth_valid, "mode": mode})
+    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 1, "breadth_valid": breadth_valid, "mode": mode})
 
     if "trend_runtime" not in st.session_state:
         st.session_state.trend_runtime = {"trades": [], "last_ltp": {}}
