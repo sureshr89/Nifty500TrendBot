@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from bot_engine import DhanClient, fetch_nifty500_index, scan_nifty500
+from bot_engine import DhanClient, fetch_nifty500_index, fetch_equity_ohlc, scan_nifty500
 
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
@@ -33,6 +33,8 @@ def premarket():
         "buy_set": result["buy_set"].to_dict(orient="records"),
         "sell_set": result["sell_set"].to_dict(orient="records"),
         "scan_errors": result["errors"],
+        "strategy": {"name": "S1", "pullback_pct": 0.15, "entry_start": "09:30", "entry_end": "13:00", "square_off": "14:55"},
+        "s1": {"trades": [], "signals": []},
     }
     write_state(state)
     return state
@@ -46,23 +48,72 @@ def market():
     day_pct = (ltp - pdc) / pdc * 100 if pdc else 0
     previous_market = state.get("market", {})
     ad_ratio = float(previous_market.get("ad_ratio", 1.0))
-    if day_pct > 0 and ad_ratio > 1:
-        mode = "BUY"
-    elif day_pct < 0 and ad_ratio < 1:
-        mode = "SELL"
-    else:
-        mode = "NEUTRAL"
-    state["market"] = {
-        "ltp": ltp,
-        "pdc": pdc,
-        "day_pct": day_pct,
-        "advances": previous_market.get("advances", 0),
-        "declines": previous_market.get("declines", 0),
-        "ad_ratio": ad_ratio,
-        "mode": mode,
-    }
-    state.setdefault("health", {})
-    state["health"].update({"worker_status": "ok", "last_scan_ist": now(), "last_error": ""})
+    mode = "BUY" if day_pct > 0 and ad_ratio > 1 else ("SELL" if day_pct < 0 and ad_ratio < 1 else "NEUTRAL")
+
+    now_dt = datetime.now(IST)
+    hhmm = now_dt.strftime("%H:%M")
+    pullback = 0.0015
+    s1 = state.setdefault("s1", {"trades": [], "signals": []})
+    trades = s1.setdefault("trades", [])
+    open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
+
+    # Forced square-off at 14:55 IST.
+    if open_trade and hhmm >= "14:55":
+        quotes = fetch_equity_ohlc(client, [open_trade["SecurityId"]])
+        q = quotes.get(int(open_trade["SecurityId"]))
+        if q:
+            exit_price = q["ltp"]
+            open_trade.update({"status": "CLOSED", "exit_price": exit_price, "exit_reason": "AUTO_SQUARE_OFF", "exit_time": now()})
+
+    # Only one S1 position at a time. Entries 09:30 <= time < 13:00.
+    if not open_trade and "09:30" <= hhmm < "13:00" and mode in ("BUY", "SELL"):
+        candidates = state.get("buy_set" if mode == "BUY" else "sell_set", [])
+        ids = [x["SecurityId"] for x in candidates]
+        quotes = fetch_equity_ohlc(client, ids)
+        for stock in candidates:
+            sid = int(stock["SecurityId"])
+            q = quotes.get(sid)
+            if not q:
+                continue
+            pdh = float(stock.get("PDH", 0))
+            pdl = float(stock.get("PDL", 0))
+            if pdh <= 0 or pdl <= 0:
+                continue
+
+            if mode == "BUY":
+                pulled_back = q["open"] > pdh and q["low"] <= pdh * (1 - pullback)
+                crossed = q["ltp"] >= pdh
+                if pulled_back and crossed:
+                    sl = (pdh + pdl) / 2
+                    risk = q["ltp"] - sl
+                    if risk <= 0: continue
+                    trade = {"strategy":"S1","side":"BUY","status":"OPEN","Symbol":stock["Symbol"],"SecurityId":sid,"entry_price":q["ltp"],"PDH":pdh,"PDL":pdl,"SL":sl,"target":q["ltp"] + risk * 2,"entry_time":now()}
+                    trades.append(trade); s1["signals"]=[trade]; break
+            else:
+                retraced = q["open"] < pdl and q["high"] >= pdl * (1 + pullback)
+                crossed = q["ltp"] <= pdl
+                if retraced and crossed:
+                    sl = (pdh + pdl) / 2
+                    risk = sl - q["ltp"]
+                    if risk <= 0: continue
+                    trade = {"strategy":"S1","side":"SELL","status":"OPEN","Symbol":stock["Symbol"],"SecurityId":sid,"entry_price":q["ltp"],"PDH":pdh,"PDL":pdl,"SL":sl,"target":q["ltp"] - risk * 2,"entry_time":now()}
+                    trades.append(trade); s1["signals"]=[trade]; break
+
+    # Monitor open S1 trade for SL/target.
+    open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
+    if open_trade:
+        q = fetch_equity_ohlc(client, [open_trade["SecurityId"]]).get(int(open_trade["SecurityId"]))
+        if q:
+            px = q["ltp"]
+            if open_trade["side"] == "BUY":
+                reason = "STOP_LOSS" if px <= open_trade["SL"] else ("TARGET" if px >= open_trade["target"] else "")
+            else:
+                reason = "STOP_LOSS" if px >= open_trade["SL"] else ("TARGET" if px <= open_trade["target"] else "")
+            if reason:
+                open_trade.update({"status":"CLOSED","exit_price":px,"exit_reason":reason,"exit_time":now()})
+
+    state["market"] = {"ltp": ltp, "pdc": pdc, "day_pct": day_pct, "advances": previous_market.get("advances", 0), "declines": previous_market.get("declines", 0), "ad_ratio": ad_ratio, "mode": mode}
+    state.setdefault("health", {}).update({"worker_status": "ok", "last_scan_ist": now(), "last_error": ""})
     write_state(state)
     return state
 
