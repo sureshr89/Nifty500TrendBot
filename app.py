@@ -113,12 +113,13 @@ def trend_check(state):
     breadth_quotes = {}
     for start in range(0, len(universe_ids), 1000):
         breadth_quotes.update(client.quotes(universe_ids[start:start + 1000]))
-    valid_count = len(breadth_quotes)
-    advances = sum(1 for sid, q in breadth_quotes.items() if sid in pdc_by_id and q["ltp"] > pdc_by_id[sid])
-    declines = sum(1 for sid, q in breadth_quotes.items() if sid in pdc_by_id and q["ltp"] < pdc_by_id[sid])
-    unchanged = sum(1 for sid, q in breadth_quotes.items() if sid in pdc_by_id and q["ltp"] == pdc_by_id[sid])
-    ad_ratio = (advances / declines) if valid_count >= 480 and declines > 0 else None
+    valid_ids = [sid for sid, q in breadth_quotes.items() if sid in pdc_by_id and q.get("ltp") is not None]
+    valid_count = len(valid_ids)
+    advances = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] > pdc_by_id[sid])
+    declines = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] < pdc_by_id[sid])
+    unchanged = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] == pdc_by_id[sid])
     breadth_valid = valid_count >= 480
+    ad_ratio = (advances / declines) if breadth_valid and declines > 0 else None
     ltp = market.get("ltp")
     pdc = market.get("pdc")
 
