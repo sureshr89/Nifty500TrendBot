@@ -81,7 +81,7 @@ def in_entry_window(dt):
     hhmm = dt.strftime("%H:%M")
     return "09:30" <= hhmm < "13:00"
 
-def s1_check(state):
+def trend_check(state):
     client = DhanLiveClient()
     market = dict(state.get("market", {}))
     buy_rows = state.get("buy_set", [])
@@ -105,8 +105,8 @@ def s1_check(state):
     mode = "BUY" if day_pct > 0 and ad_ratio > 1 else ("SELL" if day_pct < 0 and ad_ratio < 1 else "NEUTRAL")
     market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "mode": mode})
 
-    if "s1_runtime" not in st.session_state:
-        st.session_state.s1_runtime = {"trades": [], "last_ltp": {}}
+    if "trend_runtime" not in st.session_state:
+        st.session_state.trend_runtime = {"trades": [], "last_ltp": {}}
     runtime = st.session_state.s1_runtime
     trades = runtime["trades"]
     open_trade = next((t for t in trades if t["status"] == "OPEN"), None)
@@ -132,11 +132,22 @@ def s1_check(state):
                 open_trade.update({"status": "CLOSED", "exit_price": px, "exit_reason": reason, "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
                 open_trade = None
 
-    # New S1 entry: one position at a time.
+    # New S1/S2/S3 entry: one position at a time.
+    # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     if not open_trade and in_entry_window(dt) and mode in ("BUY", "SELL"):
         candidates = buy_rows if mode == "BUY" else sell_rows
         ids = [x["SecurityId"] for x in candidates]
         quotes = client.quotes(ids)
+
+        def open_position(strategy, side, stock, sid, q, sl, target):
+            trades.append({
+                "strategy": strategy, "side": side, "status": "OPEN",
+                "Symbol": stock["Symbol"], "SecurityId": sid,
+                "entry_price": q["ltp"], "PDH": float(stock["PDH"]),
+                "PDL": float(stock["PDL"]), "SL": sl, "target": target,
+                "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")
+            })
+
         for stock in candidates:
             sid = int(stock["SecurityId"])
             q = quotes.get(sid)
@@ -146,27 +157,70 @@ def s1_check(state):
             if pdh <= 0 or pdl <= 0:
                 continue
             prev_ltp = runtime["last_ltp"].get(sid)
+            entry_made = False
 
             if mode == "BUY":
-                pulled_back = q["open"] > pdh and q["low"] <= pdh * 0.9985
-                crossed = (prev_ltp is None or prev_ltp < pdh) and q["ltp"] >= pdh
-                if pulled_back and crossed:
+                # S1: Open > PDH, low 0.15% below PDH, reclaim PDH.
+                s1 = q["open"] > pdh and q["low"] <= pdh * 0.9985 and (prev_ltp is None or prev_ltp < pdh) and q["ltp"] >= pdh
+                if s1:
                     sl = (pdh + pdl) / 2
                     risk = q["ltp"] - sl
                     if risk > 0:
-                        trades.append({"strategy":"S1","side":"BUY","status":"OPEN","Symbol":stock["Symbol"],"SecurityId":sid,"entry_price":q["ltp"],"PDH":pdh,"PDL":pdl,"SL":sl,"target":q["ltp"] + 2*risk,"entry_time":dt.strftime("%Y-%m-%d %H:%M:%S IST")})
-                        break
+                        open_position("S1", "BUY", stock, sid, q, sl, q["ltp"] + 2 * risk)
+                        entry_made = True
+
+                # S2: Open between PDL/PDH, low 0.15% below PDL, reclaim PDL.
+                if not entry_made:
+                    s2 = pdl < q["open"] < pdh and q["low"] <= pdl * 0.9985 and (prev_ltp is None or prev_ltp < pdl) and q["ltp"] >= pdl
+                    if s2:
+                        sl = q["low"]
+                        risk = q["ltp"] - sl
+                        if risk > 0:
+                            open_position("S2", "BUY", stock, sid, q, sl, q["ltp"] + 1.25 * risk)
+                            entry_made = True
+
+                # S3: Open < PDL and reclaim PDL; SL = today's low; target = 1.25R.
+                if not entry_made:
+                    s3 = q["open"] < pdl and (prev_ltp is None or prev_ltp < pdl) and q["ltp"] >= pdl
+                    if s3:
+                        sl = q["low"]
+                        risk = q["ltp"] - sl
+                        if risk > 0:
+                            open_position("S3", "BUY", stock, sid, q, sl, q["ltp"] + 1.25 * risk)
+                            entry_made = True
             else:
-                retraced = q["open"] < pdl and q["high"] >= pdl * 1.0015
-                crossed = (prev_ltp is None or prev_ltp > pdl) and q["ltp"] <= pdl
-                if retraced and crossed:
+                # S1: Open < PDL, high 0.15% above PDL, break below PDL.
+                s1 = q["open"] < pdl and q["high"] >= pdl * 1.0015 and (prev_ltp is None or prev_ltp > pdl) and q["ltp"] <= pdl
+                if s1:
                     sl = (pdh + pdl) / 2
                     risk = sl - q["ltp"]
                     if risk > 0:
-                        trades.append({"strategy":"S1","side":"SELL","status":"OPEN","Symbol":stock["Symbol"],"SecurityId":sid,"entry_price":q["ltp"],"PDH":pdh,"PDL":pdl,"SL":sl,"target":q["ltp"] - 2*risk,"entry_time":dt.strftime("%Y-%m-%d %H:%M:%S IST")})
-                        break
+                        open_position("S1", "SELL", stock, sid, q, sl, q["ltp"] - 2 * risk)
+                        entry_made = True
+
+                # S2: Open between PDL/PDH, high 0.15% above PDH, break below PDH.
+                if not entry_made:
+                    s2 = pdl < q["open"] < pdh and q["high"] >= pdh * 1.0015 and (prev_ltp is None or prev_ltp > pdh) and q["ltp"] <= pdh
+                    if s2:
+                        sl = q["high"]
+                        risk = sl - q["ltp"]
+                        if risk > 0:
+                            open_position("S2", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
+                            entry_made = True
+
+                # S3: Open > PDH and break below PDH; SL = today's high; target = 1.25R.
+                if not entry_made:
+                    s3 = q["open"] > pdh and (prev_ltp is None or prev_ltp > pdh) and q["ltp"] <= pdh
+                    if s3:
+                        sl = q["high"]
+                        risk = sl - q["ltp"]
+                        if risk > 0:
+                            open_position("S3", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
+                            entry_made = True
 
             runtime["last_ltp"][sid] = q["ltp"]
+            if entry_made:
+                break
 
     return market, runtime["trades"]
 
@@ -188,12 +242,12 @@ div[data-testid="stExpander"] {border-radius: 12px;}
 """, unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 / S2 / S3 stock universe")
+st.caption("Live Dhan monitoring • S1 / S2 / S3 paper strategies")
 st.caption(f"IST • {now_ist():%d %b %Y, %H:%M:%S}  |  🔄 Auto refresh: 15 sec")
 
 try:
     state = load_premarket_state()
-    market, trades = s1_check(state)
+    market, trades = trend_check(state)
     live_status = "🟢 ACTIVE"
 except Exception as exc:
     state = {}
@@ -219,14 +273,15 @@ m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
 st.caption(f"PDC: {market.get('pdc', '—')}  •  Last live check: {now_ist():%H:%M:%S IST}")
 
 st.divider()
-st.subheader("🎯 S1 Strategy Status")
+st.subheader("🎯 Strategy Status — S1 / S2 / S3")
 s1a, s1b, s1c = st.columns(3)
 s1a.metric("Entry Window", "09:30–13:00")
 s1b.metric("Pullback", "0.15%")
 s1c.metric("Square-off", "14:55")
 
-st.caption("BUY: Open > PDH → pullback 0.15% below PDH → reclaim PDH")
-st.caption("SELL: Open < PDL → retrace 0.15% above PDL → break below PDL")
+st.caption("S1 BUY: Open > PDH → Low ≤ PDH − 0.15% → reclaim PDH | S1 SELL: Open < PDL → High ≥ PDL + 0.15% → break PDL")
+st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDH + 0.15% → break PDH")
+st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R")
 
 open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
 if open_trade:
@@ -237,13 +292,13 @@ if open_trade:
     c1.metric("Target", f"₹{open_trade.get('target', 0):.2f}")
     d.metric("Status", "OPEN")
 else:
-    st.info("No open S1 paper position")
+    st.info("No open S1 / S2 / S3 paper position")
 
 st.divider()
-st.subheader("📋 S1 Trade History")
+st.subheader("📋 S1 / S2 / S3 Trade History")
 if trades:
     trade_frame = pd.DataFrame(trades)
-    mobile_cols = [c for c in ["Symbol","side","status","entry_price","SL","target","exit_price","exit_reason","entry_time"] if c in trade_frame.columns]
+    mobile_cols = [c for c in ["strategy","Symbol","side","status","entry_price","SL","target","exit_price","exit_reason","entry_time"] if c in trade_frame.columns]
     st.dataframe(trade_frame[mobile_cols], use_container_width=True, hide_index=True)
 else:
     st.caption("No paper trades yet.")
