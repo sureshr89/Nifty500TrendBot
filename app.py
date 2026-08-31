@@ -111,11 +111,11 @@ def trend_check(state):
                 stock["LTP"] = q["ltp"]
         except (TypeError, ValueError):
             pass
-    valid_ids = [sid for sid, q in breadth_quotes.items() if sid in pdc_by_id and q.get("ltp") is not None]
+    valid_ids = [sid for sid, q in live_quotes.items() if sid in pdc_by_id and q.get("ltp") is not None]
     valid_count = len(valid_ids)
-    advances = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] > pdc_by_id[sid])
-    declines = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] < pdc_by_id[sid])
-    unchanged = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] == pdc_by_id[sid])
+    advances = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] > pdc_by_id[sid])
+    declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < pdc_by_id[sid])
+    unchanged = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] == pdc_by_id[sid])
     breadth_valid = valid_count >= 480
     ad_ratio = (advances / declines) if breadth_valid and declines > 0 else None
     ltp = market.get("ltp")
