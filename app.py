@@ -257,7 +257,7 @@ def trend_check(state):
                     sl = (pdh + pdl) / 2
                     risk = q["ltp"] - sl
                     if risk > 0:
-                        entry_made = open_position("S1", "BUY", stock, sid, q, sl, q["ltp"] + 2 * risk)
+                        entry_made = open_position("S1", "BUY", stock, sid, q, sl, q["ltp"] + 1.25 * risk)
 
                 # S2: Open between PDL/PDH, low 0.15% below PDL, reclaim PDL.
                 if not entry_made:
@@ -283,7 +283,7 @@ def trend_check(state):
                     sl = (pdh + pdl) / 2
                     risk = sl - q["ltp"]
                     if risk > 0:
-                        entry_made = open_position("S1", "SELL", stock, sid, q, sl, q["ltp"] - 2 * risk)
+                        entry_made = open_position("S1", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
 
                 # S2: Open between PDL/PDH, high 0.15% above PDL, break below PDL.
                 if not entry_made:
