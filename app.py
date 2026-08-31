@@ -309,7 +309,7 @@ def show_set(title, rows, icon):
             st.caption("No stocks in this set.")
             return
         frame = pd.DataFrame(rows)
-        preferred = ["Symbol", "Company", "Sector", "Trend", "1Y Return %", "6M Return %", "1M Return %", "1W Return %", "1D Return %", "PDH", "PDL", "SecurityId"]
+        preferred = ["Symbol", "Company", "Sector", "Trend", "LTP", "1Y Return %", "6M Return %", "1M Return %", "1W Return %", "1D Return %", "PDH", "PDL", "SecurityId"]
         cols = [x for x in preferred if x in frame.columns]
         st.dataframe(frame[cols] if cols else frame, use_container_width=True, hide_index=True)
 
