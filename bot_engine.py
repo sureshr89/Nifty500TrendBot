@@ -179,20 +179,23 @@ def fetch_equity_ohlc(client, security_ids):
 
 
 def add_s1_levels(frame):
+    """Attach previous-day high, low and close for S1/S2/S3."""
     out = frame.copy()
-    pdh, pdl = [], []
+    pdh, pdl, pdc = [], [], []
     client = DhanClient()
     for _, stock in out.iterrows():
         hist = _history(client, stock["SecurityId"])
         if len(hist) < 2:
-            pdh.append(None); pdl.append(None)
+            pdh.append(None); pdl.append(None); pdc.append(None)
         else:
             prev = hist.iloc[-2]
             pdh.append(float(prev["high"]))
             pdl.append(float(prev["low"]))
+            pdc.append(float(prev["close"]))
     out["PDH"] = pdh
     out["PDL"] = pdl
-    return out.dropna(subset=["PDH", "PDL"]).copy()
+    out["PDC"] = pdc
+    return out.dropna(subset=["PDH", "PDL", "PDC"]).copy()
 
 
 def scan_nifty500():
