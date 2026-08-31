@@ -20,7 +20,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "breadth-fix-480-v4"
+APP_BUILD = "ltp-decoupled-from-pdc-v5"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -93,16 +93,29 @@ def trend_check(state):
     sell_rows = state.get("sell_set", [])
     # Build live breadth universe and fetch NSE equities once per refresh.
     universe_rows = state.get("breadth_universe", []) or state.get("classified", []) or buy_rows + sell_rows
+
+    # Quote eligibility must NOT depend on PDC.  A stock can still need a live
+    # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
     universe_ids, pdc_by_id = [], {}
     for row in universe_rows:
         try:
             sid = int(row.get("SecurityId"))
-            row_pdc = float(row.get("PDC", row.get("pdc", 0)))
-            if row_pdc > 0:
-                universe_ids.append(sid)
-                pdc_by_id[sid] = row_pdc
+            universe_ids.append(sid)
         except (TypeError, ValueError):
             continue
+        try:
+            row_pdc = float(row.get("PDC", row.get("pdc", 0)))
+            if row_pdc > 0:
+                pdc_by_id[sid] = row_pdc
+        except (TypeError, ValueError):
+            pass
+
+    # Always include every strategy-set stock in the quote request.
+    for row in buy_rows + sell_rows:
+        try:
+            universe_ids.append(int(row.get("SecurityId")))
+        except (TypeError, ValueError):
+            pass
 
     live_quotes = client.quotes(sorted(set(universe_ids)), exchange_segment="NSE_EQ")
 
