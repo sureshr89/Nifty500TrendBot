@@ -244,7 +244,7 @@ def trend_check(state):
                         open_position("S1", "BUY", stock, sid, q, sl, q["ltp"] + 2 * risk)
                         entry_made = True
 
-                # S2: Open between PDL/PDH, low 0.15% below PDC, reclaim PDL.
+                # S2: Open between PDL/PDH, low 0.15% below PDL, reclaim PDL.
                 if not entry_made:
                     s2 = pdl < q["open"] < pdh and q["low"] <= pdl * 0.9985 and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
                     if s2:
@@ -256,7 +256,7 @@ def trend_check(state):
 
                 # S3: Open < PDL and reclaim PDL; SL = today's low; target = 1.25R.
                 if not entry_made:
-                    s3 = q["open"] < pdl and (prev_ltp is None or prev_ltp < pdl) and q["ltp"] >= pdl
+                    s3 = q["open"] < pdl and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
                     if s3:
                         sl = q["low"]
                         risk = q["ltp"] - sl
@@ -273,7 +273,7 @@ def trend_check(state):
                         open_position("S1", "SELL", stock, sid, q, sl, q["ltp"] - 2 * risk)
                         entry_made = True
 
-                # S2: Open between PDL/PDH, high 0.15% above PDC, break below PDL.
+                # S2: Open between PDL/PDH, high 0.15% above PDL, break below PDL.
                 if not entry_made:
                     s2 = pdl < q["open"] < pdh and q["high"] >= pdl * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                     if s2:
@@ -285,7 +285,7 @@ def trend_check(state):
 
                 # S3: Open > PDH and break below PDH; SL = today's high; target = 1.25R.
                 if not entry_made:
-                    s3 = q["open"] > pdh and (prev_ltp is None or prev_ltp > pdh) and q["ltp"] <= pdh
+                    s3 = q["open"] > pdh and prev_ltp is not None and prev_ltp > pdh and q["ltp"] <= pdh
                     if s3:
                         sl = q["high"]
                         risk = sl - q["ltp"]
