@@ -192,6 +192,35 @@ def trend_check(state):
     advances = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] > resolved_pdc[sid])
     declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < resolved_pdc[sid])
     unchanged = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] == resolved_pdc[sid])
+
+    # Live sector-wise A/D for the same NIFTY 500 breadth universe.
+    sector_by_id = {}
+    for row in universe_rows:
+        try:
+            sid = int(row.get("SecurityId"))
+        except (TypeError, ValueError):
+            continue
+        sector = str(row.get("Sector") or row.get("Industry") or "").strip()
+        if sector:
+            sector_by_id[sid] = sector
+
+    sector_breadth = {}
+    for sid in valid_ids:
+        sector = sector_by_id.get(sid)
+        if not sector:
+            continue
+        bucket = sector_breadth.setdefault(sector, {"advances": 0, "declines": 0, "unchanged": 0, "valid": 0})
+        bucket["valid"] += 1
+        if live_quotes[sid]["ltp"] > resolved_pdc[sid]:
+            bucket["advances"] += 1
+        elif live_quotes[sid]["ltp"] < resolved_pdc[sid]:
+            bucket["declines"] += 1
+        else:
+            bucket["unchanged"] += 1
+    for sector, bucket in sector_breadth.items():
+        adv, dec = bucket["advances"], bucket["declines"]
+        bucket["ad_ratio"] = (adv / dec) if dec > 0 else (float("inf") if adv > 0 else None)
+
     # Use every valid Dhan quote available. Do not block A/D behind an arbitrary
     # 480-stock threshold; the dashboard should show live breadth whenever Dhan
     # returns enough advancing/declining data to calculate it.
@@ -218,7 +247,7 @@ def trend_check(state):
         day_pct = market.get("day_pct", 0)
 
     mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
-    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 1, "breadth_valid": breadth_valid, "mode": mode})
+    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 1, "breadth_valid": breadth_valid, "sector_breadth": sector_breadth, "mode": mode})
 
     if "trend_runtime" not in st.session_state:
         persisted = load_persisted_trades()
@@ -288,6 +317,16 @@ def trend_check(state):
             if pdh <= 0 or pdl <= 0 or pdc <= 0:
                 continue
             prev_ltp = runtime["last_ltp"].get(sid)
+            sector = str(stock.get("Sector") or stock.get("Industry") or "").strip()
+            sector_stats = sector_breadth.get(sector)
+            sector_ad = sector_stats.get("ad_ratio") if sector_stats else None
+            sector_bias_ok = (
+                (mode == "BUY" and sector_ad is not None and sector_ad > 1)
+                or (mode == "SELL" and sector_ad is not None and sector_ad < 1)
+            )
+            if not sector_bias_ok:
+                runtime["last_ltp"][sid] = q["ltp"]
+                continue
             entry_made = False
             open_strategies = {t["strategy"] for t in trades if t["status"] == "OPEN"}
 
@@ -416,6 +455,14 @@ m2.metric("Day %", f"{float(market.get('day_pct', 0)):.2f}%")
 m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
 
 st.caption(f"PDC: {market.get('pdc', '—')} • Breadth: {market.get('valid_breadth_stocks', 0)} valid quotes • Adv: {market.get('advances', 0)} • Dec: {market.get('declines', 0)} • Unch: {market.get('unchanged', 0)} • Last live check: {now_ist():%H:%M:%S IST}")
+
+sector_breadth = market.get("sector_breadth", {})
+if sector_breadth:
+    sector_rows = [{"Sector": s, **v} for s, v in sorted(sector_breadth.items())]
+    sector_frame = pd.DataFrame(sector_rows)
+    with st.expander("🏢 Live Sector A/D Confirmation", expanded=False):
+        st.caption("BUY trades require the stock's Sector A/D > 1. SELL trades require the stock's Sector A/D < 1. Missing/neutral sector breadth blocks new entries.")
+        st.dataframe(sector_frame, use_container_width=True, hide_index=True)
 
 st.divider()
 st.subheader("🎯 Strategy Status — S1 / S2 / S3 / S4")
