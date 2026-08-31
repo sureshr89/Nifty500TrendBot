@@ -338,11 +338,9 @@ def trend_check(state):
             sector = str(stock.get("Sector") or stock.get("Industry") or "").strip()
             sector_stats = sector_breadth.get(sector)
             sector_ad = sector_stats.get("ad_ratio") if sector_stats else None
-            # A/D = 0 is treated as invalid/no-trade for both directions.
-            # BUY requires sector A/D > 1; SELL requires 0 < sector A/D < 1.
             sector_bias_ok = (
                 (mode == "BUY" and sector_ad is not None and sector_ad > 1)
-                or (mode == "SELL" and sector_ad is not None and sector_ad > 0 and sector_ad < 1)
+                or (mode == "SELL" and sector_ad is not None and sector_ad < 1)
             )
             if not sector_bias_ok:
                 runtime["last_ltp"][sid] = q["ltp"]
