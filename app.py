@@ -1,99 +1,73 @@
-"""Dhan-only NIFTY 500 trend dashboard.
+"""Display-only Streamlit dashboard.
 
-Phase 1 only: classify the NIFTY 500 into BUY/SELL sets using four
-positive/negative return timeframes and display the current NIFTY 500
-market mode relative to PDC. No trading or order logic is included.
+GitHub Actions performs all Dhan API work. This app never imports the engine
+and never calls Dhan. It only reads the latest persisted state.
 """
 
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import streamlit as st
-
-from bot_engine import scan_nifty500
+from streamlit_autorefresh import st_autorefresh
 
 IST = ZoneInfo("Asia/Kolkata")
+REPO = "sureshr89/Nifty500TrendBot"
+STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-st.set_page_config(
-    page_title="NIFTY 500 Trend Bot",
-    page_icon="📈",
-    layout="wide",
-)
+st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
+st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
+
+@st.cache_data(ttl=10, show_spinner=False)
+def load_state():
+    response = requests.get(STATE_URL, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("Invalid state format")
+    return data
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Dhan-only data • 1Y / 6M / 1M / 1W trend classification")
+st.caption("GitHub Actions → Dhan → 15-second LTP worker → persisted state → Dashboard")
 st.caption(f"IST: {datetime.now(IST):%d-%m-%Y %H:%M:%S}")
-
-@st.cache_data(ttl=300, show_spinner="Loading NIFTY 500 data from Dhan…")
-def load_scan():
-    return scan_nifty500()
+st.caption("🔄 Dashboard refresh every 15 seconds")
 
 try:
-    result = load_scan()
+    state = load_state()
 except Exception as exc:
-    st.error("Dhan scan failed.")
-    st.exception(exc)
+    st.warning("No GitHub worker state is available yet. Run the pre-market scan first.")
+    st.caption(str(exc))
     st.stop()
 
-market = result["market"]
-frame = result["classified"]
-buy_set = result["buy_set"]
-sell_set = result["sell_set"]
+market = state.get("market", {})
+health = state.get("health", {})
+buy_rows = state.get("buy_set", [])
+sell_rows = state.get("sell_set", [])
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("NIFTY 500 LTP", f"{market['ltp']:,.2f}")
-m2.metric("NIFTY 500 PDC", f"{market['pdc']:,.2f}")
-m3.metric("Day %", f"{market['day_pct']:.2f}%")
-m4.metric("Market Mode", market["mode"])
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Worker Status", health.get("worker_status", "unknown"))
+c2.metric("Last Scan", health.get("last_scan_ist", "Not available"))
+c3.metric("NIFTY 500 LTP", market.get("ltp", "—"))
+c4.metric("Market Mode", market.get("mode", "NEUTRAL"))
 
-if market["mode"] == "BUY":
-    st.success("🟢 NIFTY 500 is above PDC — BUY side is active.")
-elif market["mode"] == "SELL":
-    st.error("🔴 NIFTY 500 is below PDC — SELL side is active.")
-else:
-    st.warning("🟡 NIFTY 500 is at PDC — neutral.")
+st.caption(f"PDC: {market.get('pdc', '—')} | Day %: {market.get('day_pct', '—')}")
 
-c1, c2 = st.columns(2)
-c1.metric("BUY SET", len(buy_set))
-c2.metric("SELL SET", len(sell_set))
+def show_set(title, rows):
+    st.subheader(title)
+    if not rows:
+        st.info("No stocks in this set.")
+        return
+    frame = pd.DataFrame(rows)
+    preferred = ["Symbol", "Company", "Sector", "SecurityId", "1Y Return %", "6M Return %", "1M Return %", "1W Return %", "Trend"]
+    columns = [c for c in preferred if c in frame.columns]
+    st.dataframe(frame[columns] if columns else frame, use_container_width=True, hide_index=True)
 
-columns = [
-    "Symbol",
-    "Company",
-    "Sector",
-    "1Y Return %",
-    "6M Return %",
-    "1M Return %",
-    "1W Return %",
-    "Trend",
-]
+show_set(f"🟢 BUY SET ({len(buy_rows)})", buy_rows)
+show_set(f"🔴 SELL SET ({len(sell_rows)})", sell_rows)
 
-st.subheader("🟢 BUY SET")
-if buy_set.empty:
-    st.info("No stock is bullish across all four timeframes.")
-else:
-    st.dataframe(
-        buy_set[columns].sort_values("Symbol"),
-        use_container_width=True,
-        hide_index=True,
-    )
+if health.get("last_error"):
+    st.error(health["last_error"])
 
-st.subheader("🔴 SELL SET")
-if sell_set.empty:
-    st.info("No stock is bearish across all four timeframes.")
-else:
-    st.dataframe(
-        sell_set[columns].sort_values("Symbol"),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-st.subheader("All NIFTY 500")
-st.dataframe(
-    frame[columns].sort_values("Symbol"),
-    use_container_width=True,
-    hide_index=True,
-)
-
-st.caption("Phase 1 only — no entry, exit, paper-trading, or order execution logic is included.")
+st.caption("Dashboard only. No Dhan credentials and no Dhan API calls are required here.")
