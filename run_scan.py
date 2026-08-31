@@ -30,6 +30,7 @@ def premarket():
             "last_error": ""
         },
         "market": result["market"],
+        "state_schema_version": 2,
         "classified": result["classified"].to_dict(orient="records"),
         "breadth_universe": breadth_universe.to_dict(orient="records"),
         "buy_set": result["buy_set"].to_dict(orient="records"),
