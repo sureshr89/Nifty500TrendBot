@@ -2,17 +2,8 @@ name: NIFTY 500 Trend Worker
 
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "premarket or market"
-        required: true
-        default: "premarket"
-      market_scan_count:
-        description: "Number of 15-second market scans for this run"
-        required: false
-        default: "20"
   schedule:
-    - cron: "15 3 * * 1-5"
+    - cron: "0 3 * * 1-5"
 
 permissions:
   contents: write
@@ -42,9 +33,6 @@ jobs:
 
       - name: Run Dhan worker
         env:
-          WORKER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'premarket' }}
-          MARKET_SCAN_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.market_scan_count || '1' }}
-          MARKET_SCAN_SECONDS: "15"
         run: python run_scan.py
 
       - name: Publish latest state
