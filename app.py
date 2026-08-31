@@ -46,11 +46,12 @@ health = state.get("health", {})
 buy_rows = state.get("buy_set", [])
 sell_rows = state.get("sell_set", [])
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Worker Status", health.get("worker_status", "unknown"))
 c2.metric("Last Scan", health.get("last_scan_ist", "Not available"))
 c3.metric("NIFTY 500 LTP", market.get("ltp", "—"))
-c4.metric("Market Mode", market.get("mode", "NEUTRAL"))
+c4.metric("A/D Ratio", market.get("ad_ratio", "—"))
+c5.metric("Market Mode", market.get("mode", "NEUTRAL"))
 
 st.caption(f"PDC: {market.get('pdc', '—')} | Day %: {market.get('day_pct', '—')}")
 
