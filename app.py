@@ -18,15 +18,16 @@ from streamlit_autorefresh import st_autorefresh
 IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
+STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "breadth-fix-480-v2"
+APP_BUILD = "breadth-fix-480-v3"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
 
 @st.cache_data(ttl=10, show_spinner=False)
 def load_premarket_state():
-    response = requests.get(STATE_URL, timeout=15)
+    response = requests.get(STATE_URL, params={"t": int(time.time() // 10)}, timeout=15)
     response.raise_for_status()
     data = response.json()
     if not isinstance(data, dict):
