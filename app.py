@@ -1,4 +1,4 @@
-"""Active Streamlit dashboard and 15-second S1/S2/S3 paper-trading worker.
+"""Active Streamlit dashboard and 15-second S1/S2/S3/S4 paper-trading worker.
 
 Pre-market BUY/SELL sets and PDH/PDL are read from the bot-state branch.
 When the Streamlit app is active, this app fetches fresh Dhan market data every
@@ -209,9 +209,9 @@ def trend_check(state):
             trade.update({"status": "CLOSED", "exit_price": px, "exit_reason": reason, "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # New S1/S2/S3 entries: maximum 3 positions total, one OPEN per strategy.
+    # New S1/S2/S3 entries: maximum 4 positions total, one OPEN per strategy.
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
-    if len(open_trades) < 3 and in_entry_window(dt) and mode in ("BUY", "SELL"):
+    if len(open_trades) < 4 and in_entry_window(dt) and mode in ("BUY", "SELL"):
         candidates = buy_rows if mode == "BUY" else sell_rows
         quotes = live_quotes
 
@@ -276,6 +276,15 @@ def trend_check(state):
                         risk = q["ltp"] - sl
                         if risk > 0:
                             entry_made = open_position("S3", "BUY", stock, sid, q, sl, q["ltp"] + 1.25 * risk)
+
+                    # S4 BUY: open inside previous-day range, then break above PDH.
+                    if not entry_made and "S4" not in open_strategies:
+                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp < pdh and q["ltp"] >= pdh
+                        if s4:
+                            sl = (pdh + pdl) / 2
+                            risk = q["ltp"] - sl
+                            if risk > 0:
+                                entry_made = open_position("S4", "BUY", stock, sid, q, sl, q["ltp"] + 1.25 * risk)
             else:
                 # S1: Open < PDL, high 0.15% above PDL, break below PDL.
                 s1 = q["open"] < pdl and q["high"] >= pdl * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
@@ -303,6 +312,15 @@ def trend_check(state):
                         if risk > 0:
                             entry_made = open_position("S3", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
 
+                    # S4 SELL: open inside previous-day range, then break below PDL.
+                    if not entry_made and "S4" not in open_strategies:
+                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp > pdl and q["ltp"] <= pdl
+                        if s4:
+                            sl = (pdh + pdl) / 2
+                            risk = sl - q["ltp"]
+                            if risk > 0:
+                                entry_made = open_position("S4", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
+
             runtime["last_ltp"][sid] = q["ltp"]
             if entry_made:
                 break
@@ -327,7 +345,7 @@ div[data-testid="stExpander"] {border-radius: 12px;}
 """, unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 / S2 / S3 paper strategies")
+st.caption("Live Dhan monitoring • S1 / S2 / S3 / S4 paper strategies")
 st.caption(f"IST • {now_ist():%d %b %Y, %H:%M:%S}  |  🔄 Auto refresh: 15 sec")
 
 try:
@@ -366,7 +384,7 @@ s1c.metric("Square-off", "14:55")
 
 st.caption("S1 BUY: Open > PDH → Low ≤ PDH − 0.15% → reclaim PDH | S1 SELL: Open < PDL → High ≥ PDL + 0.15% → break PDL")
 st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDL + 0.15% → break PDL")
-st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R")
+st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R\n\nS4 BUY: Open between PDL & PDH → break above PDH | S4 SELL: Open between PDL & PDH → break below PDL | S4 target = 1.25R")
 
 open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
 if open_trade:
@@ -377,10 +395,10 @@ if open_trade:
     c1.metric("Target", f"₹{open_trade.get('target', 0):.2f}")
     d.metric("Status", "OPEN")
 else:
-    st.info("No open S1 / S2 / S3 paper position")
+    st.info("No open S1 / S2 / S3 / S4 paper position")
 
 st.divider()
-st.subheader("📋 S1 / S2 / S3 Trade History")
+st.subheader("📋 S1 / S2 / S3 / S4 Trade History")
 if trades:
     trade_frame = pd.DataFrame(trades)
     mobile_cols = [c for c in ["strategy","Symbol","side","status","entry_price","quantity","risk_amount","SL","target","exit_price","exit_reason","entry_time"] if c in trade_frame.columns]
