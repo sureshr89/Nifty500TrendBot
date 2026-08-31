@@ -1,0 +1,61 @@
+name: NIFTY 500 Trend Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "premarket or market"
+        required: true
+        default: "premarket"
+      market_scan_count:
+        description: "Number of 15-second market scans for this run"
+        required: false
+        default: "20"
+  schedule:
+    - cron: "15 3 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+      DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore latest state
+        run: |
+          git fetch origin bot-state || true
+          git show origin/bot-state:scan_state.json > scan_state.json || true
+          git show origin/bot-state:monthly_stock_ranking.csv > monthly_stock_ranking.csv || true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Dhan worker
+        env:
+          WORKER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'premarket' }}
+          MARKET_SCAN_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.market_scan_count || '1' }}
+          MARKET_SCAN_SECONDS: "15"
+        run: python run_scan.py
+
+      - name: Publish latest state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan bot-state-new
+          git rm -rf . || true
+          cp scan_state.json ./scan_state.json
+          if [ -f monthly_stock_ranking.csv ]; then cp monthly_stock_ranking.csv ./monthly_stock_ranking.csv; fi
+          git add scan_state.json monthly_stock_ranking.csv || true
+          git commit -m "Update trend worker state" || exit 0
+          git branch -M bot-state
+          git push origin bot-state --force
