@@ -119,7 +119,17 @@ def get_stock_trends(client, stock):
         "6M Return %": _return(frame, 182),
         "1M Return %": _return(frame, 30),
         "1W Return %": _return(frame, 7),
+        "1D Return %": ((float(frame.iloc[-1]["close"]) - float(frame.iloc[-2]["close"])) / float(frame.iloc[-2]["close"]) * 100.0),
     }
+
+
+def calculate_advance_decline(frame):
+    """Market breadth from Dhan historical closes for the NIFTY 500 universe."""
+    one_day = pd.to_numeric(frame["1D Return %"], errors="coerce")
+    advances = int((one_day > 0).sum())
+    declines = int((one_day < 0).sum())
+    ad_ratio = advances / declines if declines else (float("inf") if advances else 1.0)
+    return advances, declines, ad_ratio
 
 
 def fetch_nifty500_index(client):
@@ -160,14 +170,25 @@ def scan_nifty500():
     frame.loc[(frame[periods] > 0).all(axis=1), "Trend"] = "BULLISH"
     frame.loc[(frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
 
+    advances, declines, ad_ratio = calculate_advance_decline(frame)
     ltp, pdc = fetch_nifty500_index(client)
+    day_pct = ((ltp - pdc) / pdc * 100.0) if pdc else 0.0
+    if day_pct > 0 and ad_ratio > 1:
+        mode = "BUY"
+    elif day_pct < 0 and ad_ratio < 1:
+        mode = "SELL"
+    else:
+        mode = "NEUTRAL"
     return {
         "generated_at": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST"),
         "market": {
             "ltp": ltp,
             "pdc": pdc,
-            "day_pct": ((ltp - pdc) / pdc * 100.0) if pdc else 0.0,
-            "mode": "BUY" if ltp > pdc else "SELL" if ltp < pdc else "NEUTRAL",
+            "day_pct": day_pct,
+            "advances": advances,
+            "declines": declines,
+            "ad_ratio": ad_ratio,
+            "mode": mode,
         },
         "classified": frame,
         "buy_set": frame[frame["Trend"].eq("BULLISH")].copy(),
