@@ -263,7 +263,7 @@ def trend_check(state):
                 if not entry_made:
                     s2 = pdl < q["open"] < pdh and q["low"] <= pdl * 0.9985 and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
                     if s2 and "S2" not in open_strategies:
-                        sl = q["low"]
+                        sl = pdl - ((pdh - pdl) / 2)
                         risk = q["ltp"] - sl
                         if risk > 0:
                             entry_made = open_position("S2", "BUY", stock, sid, q, sl, q["ltp"] + 1.25 * risk)
@@ -289,7 +289,7 @@ def trend_check(state):
                 if not entry_made:
                     s2 = pdl < q["open"] < pdh and q["high"] >= pdl * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                     if s2 and "S2" not in open_strategies:
-                        sl = q["high"]
+                        sl = pdh + ((pdh - pdl) / 2)
                         risk = sl - q["ltp"]
                         if risk > 0:
                             entry_made = open_position("S2", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
