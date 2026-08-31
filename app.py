@@ -71,6 +71,15 @@ def show_set(title, rows):
 show_set(f"🟢 BUY SET ({len(buy_rows)})", buy_rows)
 show_set(f"🔴 SELL SET ({len(sell_rows)})", sell_rows)
 
+st.header("🎯 S1 Strategy")
+st.caption("Entry: 09:30–13:00 IST | Live check: 15 seconds | Pullback/retracement: 0.15% | Auto square-off: 14:55 IST")
+s1 = state.get("s1", {})
+trades = s1.get("trades", [])
+if trades:
+    st.dataframe(pd.DataFrame(trades), use_container_width=True, hide_index=True)
+else:
+    st.info("No S1 trade yet.")
+
 if health.get("last_error"):
     st.error(health["last_error"])
 
