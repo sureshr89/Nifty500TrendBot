@@ -158,14 +158,14 @@ def fetch_nifty500_index(client):
 
 
 def fetch_equity_ohlc(client, security_ids):
-    ids = [str(int(x)) for x in security_ids]
+    ids = [int(x) for x in security_ids]
     if not ids:
         return {}
     data = client.post("/marketfeed/ohlc", {"NSE_EQ": ids})
     quotes = ((data.get("data") or {}).get("NSE_EQ") or {})
     result = {}
     for sid in ids:
-        q = quotes.get(sid, {})
+        q = quotes.get(str(sid), quotes.get(sid, {}))
         ohlc = q.get("ohlc") or {}
         ltp = q.get("last_price")
         if ltp is None:
