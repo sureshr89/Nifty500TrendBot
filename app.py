@@ -170,56 +170,98 @@ def s1_check(state):
 
     return market, runtime["trades"]
 
+# --------------------------- Professional mobile dashboard ---------------------------
+st.markdown("""
+<style>
+.block-container {max-width: 1200px; padding-top: 1rem; padding-bottom: 2rem;}
+[data-testid="stMetric"] {background: rgba(255,255,255,.04); border: 1px solid rgba(128,128,128,.18); border-radius: 14px; padding: 10px 12px;}
+[data-testid="stMetricLabel"] {font-size: .78rem;}
+[data-testid="stMetricValue"] {font-size: 1.15rem;}
+div[data-testid="stExpander"] {border-radius: 12px;}
+@media (max-width: 640px) {
+  .block-container {padding-left: .65rem; padding-right: .65rem; padding-top: .5rem;}
+  h1 {font-size: 1.55rem !important;}
+  [data-testid="stMetric"] {padding: 8px;}
+  [data-testid="stMetricValue"] {font-size: 1rem;}
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Active Streamlit worker → Dhan live LTP → S1 paper trade")
-st.caption(f"IST: {now_ist():%d-%m-%Y %H:%M:%S}")
-st.caption("🔄 Live Dhan check every 15 seconds while this Streamlit app session is active")
+st.caption("Live Dhan monitoring • S1 paper trading")
+st.caption(f"IST • {now_ist():%d %b %Y, %H:%M:%S}  |  🔄 Auto refresh: 15 sec")
 
 try:
     state = load_premarket_state()
     market, trades = s1_check(state)
-    live_status = "ACTIVE"
+    live_status = "🟢 ACTIVE"
 except Exception as exc:
     state = {}
     market = {}
     trades = st.session_state.get("s1_runtime", {}).get("trades", [])
-    live_status = "ERROR"
+    live_status = "🔴 ERROR"
     st.error(str(exc))
 
-health = state.get("health", {})
 buy_rows = state.get("buy_set", [])
 sell_rows = state.get("sell_set", [])
+mode = market.get("mode", "NEUTRAL")
 
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Live Worker", live_status)
-c2.metric("Last Check", now_ist().strftime("%H:%M:%S IST"))
-c3.metric("NIFTY 500 LTP", market.get("ltp", "—"))
-c4.metric("A/D Ratio", market.get("ad_ratio", "—"))
-c5.metric("Market Mode", market.get("mode", "NEUTRAL"))
+st.subheader("Live Market")
+top1, top2 = st.columns(2)
+top1.metric("Worker", live_status)
+top2.metric("Market Mode", mode)
 
-st.caption(f"PDC: {market.get('pdc', '—')} | Day %: {market.get('day_pct', '—')}")
+m1, m2, m3 = st.columns(3)
+m1.metric("NIFTY 500", market.get("ltp", "—"))
+m2.metric("Day %", f"{float(market.get('day_pct', 0)):.2f}%")
+m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
 
-def show_set(title, rows):
-    st.subheader(title)
-    if not rows:
-        st.info("No stocks in this set.")
-        return
-    frame = pd.DataFrame(rows)
-    preferred = ["Symbol", "Company", "Sector", "SecurityId", "PDH", "PDL", "Trend"]
-    columns = [c for c in preferred if c in frame.columns]
-    st.dataframe(frame[columns] if columns else frame, use_container_width=True, hide_index=True)
+st.caption(f"PDC: {market.get('pdc', '—')}  •  Last live check: {now_ist():%H:%M:%S IST}")
 
-show_set(f"🟢 BUY SET ({len(buy_rows)})", buy_rows)
-show_set(f"🔴 SELL SET ({len(sell_rows)})", sell_rows)
+st.divider()
+st.subheader("🎯 S1 Strategy Status")
+s1a, s1b, s1c = st.columns(3)
+s1a.metric("Entry Window", "09:30–13:00")
+s1b.metric("Pullback", "0.15%")
+s1c.metric("Square-off", "14:55")
 
-st.header("🎯 S1 Active Paper Trading")
-st.caption("BUY: Open > PDH → Low ≤ PDH − 0.15% → LTP crosses ≥ PDH")
-st.caption("SELL: Open < PDL → High ≥ PDL + 0.15% → LTP crosses ≤ PDL")
-st.caption("Entry 09:30–13:00 IST | SL/Target monitored | Auto square-off 14:55 IST")
+st.caption("BUY: Open > PDH → pullback 0.15% below PDH → reclaim PDH")
+st.caption("SELL: Open < PDL → retrace 0.15% above PDL → break below PDL")
 
-if trades:
-    st.dataframe(pd.DataFrame(trades), use_container_width=True, hide_index=True)
+open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
+if open_trade:
+    st.success(f"OPEN • {open_trade.get('side')} • {open_trade.get('Symbol')}")
+    a,b,c1,d = st.columns(4)
+    a.metric("Entry", f"₹{open_trade.get('entry_price', 0):.2f}")
+    b.metric("SL", f"₹{open_trade.get('SL', 0):.2f}")
+    c1.metric("Target", f"₹{open_trade.get('target', 0):.2f}")
+    d.metric("Status", "OPEN")
 else:
-    st.info("No S1 paper trade yet.")
+    st.info("No open S1 paper position")
 
-st.caption("Keep this Streamlit app session active for continuous 15-second live checking.")
+st.divider()
+st.subheader("📋 S1 Trade History")
+if trades:
+    trade_frame = pd.DataFrame(trades)
+    mobile_cols = [c for c in ["Symbol","side","status","entry_price","SL","target","exit_price","exit_reason","entry_time"] if c in trade_frame.columns]
+    st.dataframe(trade_frame[mobile_cols], use_container_width=True, hide_index=True)
+else:
+    st.caption("No paper trades yet.")
+
+def show_set(title, rows, icon):
+    with st.expander(f"{icon} {title} ({len(rows)})", expanded=False):
+        if not rows:
+            st.caption("No stocks in this set.")
+            return
+        frame = pd.DataFrame(rows)
+        preferred = ["Symbol", "Company", "Sector", "PDH", "PDL", "SecurityId"]
+        cols = [x for x in preferred if x in frame.columns]
+        st.dataframe(frame[cols] if cols else frame, use_container_width=True, hide_index=True)
+
+st.divider()
+st.subheader("Stock Sets")
+show_set("BUY SET", buy_rows, "🟢")
+show_set("SELL SET", sell_rows, "🔴")
+
+st.caption("Live worker runs while this Streamlit session remains active. Dhan credentials are kept in Streamlit Secrets.")
+
