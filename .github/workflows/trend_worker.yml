@@ -30,8 +30,8 @@ jobs:
       - name: Restore latest state
         run: |
           git fetch origin bot-state || true
-          git show origin/bot-state:scan_state.json > scan_state.json || true
-          git show origin/bot-state:monthly_stock_ranking.csv > monthly_stock_ranking.csv || true
+          git show origin/bot-state:scan_state.json > scan_state.json 2>/dev/null || true
+          git show origin/bot-state:monthly_stock_ranking.csv > monthly_stock_ranking.csv 2>/dev/null || true
 
       - uses: actions/setup-python@v5
         with:
@@ -49,13 +49,23 @@ jobs:
 
       - name: Publish latest state
         run: |
+          mkdir -p /tmp/nifty500trend-state
+          cp scan_state.json /tmp/nifty500trend-state/scan_state.json
+          if [ -f monthly_stock_ranking.csv ]; then
+            cp monthly_stock_ranking.csv /tmp/nifty500trend-state/monthly_stock_ranking.csv
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan bot-state-new
           git rm -rf . || true
-          cp scan_state.json ./scan_state.json
-          if [ -f monthly_stock_ranking.csv ]; then cp monthly_stock_ranking.csv ./monthly_stock_ranking.csv; fi
-          git add scan_state.json monthly_stock_ranking.csv || true
-          git commit -m "Update trend worker state" || exit 0
+
+          cp /tmp/nifty500trend-state/scan_state.json scan_state.json
+          if [ -f /tmp/nifty500trend-state/monthly_stock_ranking.csv ]; then
+            cp /tmp/nifty500trend-state/monthly_stock_ranking.csv monthly_stock_ranking.csv
+          fi
+
+          git add scan_state.json monthly_stock_ranking.csv
+          git commit -m "Update trend worker state"
           git branch -M bot-state
           git push origin bot-state --force
