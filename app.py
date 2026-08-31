@@ -354,7 +354,7 @@ s1b.metric("Pullback", "0.15%")
 s1c.metric("Square-off", "14:55")
 
 st.caption("S1 BUY: Open > PDH → Low ≤ PDH − 0.15% → reclaim PDH | S1 SELL: Open < PDL → High ≥ PDL + 0.15% → break PDL")
-st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDH + 0.15% → break PDH")
+st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDC − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDC + 0.15% → break PDL")
 st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R")
 
 open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
