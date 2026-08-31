@@ -53,15 +53,16 @@ class DhanLiveClient:
         response.raise_for_status()
         return response.json()
 
-    def quotes(self, security_ids):
-        ids = [str(int(x)) for x in security_ids]
+    def quotes(self, security_ids, exchange_segment="NSE_EQ"):
+        # Dhan expects numeric security IDs and the correct exchange-segment key.
+        ids = [int(x) for x in security_ids]
         if not ids:
             return {}
-        data = self.post("/marketfeed/ohlc", {"NSE_EQ": ids})
-        rows = ((data.get("data") or {}).get("NSE_EQ") or {})
+        data = self.post("/marketfeed/ohlc", {exchange_segment: ids})
+        rows = ((data.get("data") or {}).get(exchange_segment) or {})
         result = {}
         for sid in ids:
-            row = rows.get(sid, {})
+            row = rows.get(str(sid), rows.get(sid, {}))
             ohlc = row.get("ohlc") or {}
             ltp = row.get("last_price")
             if ltp is None:
@@ -103,7 +104,7 @@ def trend_check(state):
     # NIFTY live refresh uses the same saved market security configuration.
     nifty_sid = market.get("security_id") or market.get("SecurityId")
     if nifty_sid:
-        nq = client.quotes([nifty_sid]).get(int(nifty_sid))
+        nq = client.quotes([nifty_sid], exchange_segment="IDX_I").get(int(nifty_sid))
         if nq:
             ltp = nq["ltp"]
 
