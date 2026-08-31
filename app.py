@@ -283,6 +283,22 @@ def trend_check(state):
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     if len(open_trades) < 4 and in_entry_window(dt) and mode in ("BUY", "SELL"):
         candidates = buy_rows if mode == "BUY" else sell_rows
+
+        # Priority across stocks: strongest sector breadth first for BUY,
+        # weakest sector breadth first for SELL.
+        def candidate_sector_ad(stock):
+            sector = str(stock.get("Sector") or stock.get("Industry") or "").strip()
+            stats = sector_breadth.get(sector, {})
+            ratio = stats.get("ad_ratio")
+            if ratio is None:
+                return float("-inf") if mode == "BUY" else float("inf")
+            return ratio
+
+        candidates = sorted(
+            candidates,
+            key=candidate_sector_ad,
+            reverse=(mode == "BUY"),
+        )
         quotes = live_quotes
 
         RISK_PER_TRADE = 1500.0
@@ -298,6 +314,8 @@ def trend_check(state):
             trades.append({
                 "strategy": strategy, "side": side, "status": "OPEN",
                 "Symbol": stock["Symbol"], "SecurityId": sid,
+                "Sector": str(stock.get("Sector") or stock.get("Industry") or "").strip(),
+                "sector_ad": candidate_sector_ad(stock),
                 "entry_price": entry, "quantity": quantity,
                 "risk_per_share": risk_per_share,
                 "risk_amount": quantity * risk_per_share,
