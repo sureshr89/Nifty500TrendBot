@@ -19,6 +19,8 @@ IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
+APP_BUILD = "breadth-fix-480-v2"
+
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
 
