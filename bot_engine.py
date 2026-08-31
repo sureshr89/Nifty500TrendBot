@@ -154,7 +154,7 @@ def fetch_nifty500_index(client):
     pdc = quote.get("previous_close") or (quote.get("ohlc") or {}).get("close")
     if ltp is None or pdc is None:
         raise RuntimeError("Dhan did not return NIFTY 500 LTP/PDC")
-    return float(ltp), float(pdc)
+    return float(ltp), float(pdc), security_id
 
 
 def fetch_equity_ohlc(client, security_ids):
@@ -218,7 +218,7 @@ def scan_nifty500():
     frame.loc[(frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
 
     advances, declines, ad_ratio = calculate_advance_decline(frame)
-    ltp, pdc = fetch_nifty500_index(client)
+    ltp, pdc, nifty_security_id = fetch_nifty500_index(client)
     day_pct = ((ltp - pdc) / pdc * 100.0) if pdc else 0.0
     if day_pct > 0 and ad_ratio > 1:
         mode = "BUY"
@@ -236,6 +236,7 @@ def scan_nifty500():
             "declines": declines,
             "ad_ratio": ad_ratio,
             "mode": mode,
+            "security_id": nifty_security_id,
         },
         "classified": frame,
         "buy_set": frame[frame["Trend"].eq("BULLISH")].copy(),
