@@ -32,7 +32,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run Dhan worker
-        env:
         run: python run_scan.py
 
       - name: Publish latest state
