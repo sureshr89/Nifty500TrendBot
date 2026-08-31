@@ -188,7 +188,7 @@ div[data-testid="stExpander"] {border-radius: 12px;}
 """, unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 paper trading")
+st.caption("Live Dhan monitoring • S1 / S2 / S3 stock universe")
 st.caption(f"IST • {now_ist():%d %b %Y, %H:%M:%S}  |  🔄 Auto refresh: 15 sec")
 
 try:
@@ -254,12 +254,13 @@ def show_set(title, rows, icon):
             st.caption("No stocks in this set.")
             return
         frame = pd.DataFrame(rows)
-        preferred = ["Symbol", "Company", "Sector", "PDH", "PDL", "SecurityId"]
+        preferred = ["Symbol", "Company", "Sector", "Trend", "1Y Return %", "6M Return %", "1M Return %", "1W Return %", "1D Return %", "PDH", "PDL", "SecurityId"]
         cols = [x for x in preferred if x in frame.columns]
         st.dataframe(frame[cols] if cols else frame, use_container_width=True, hide_index=True)
 
 st.divider()
-st.subheader("Stock Sets")
+st.subheader("Stock Sets — Full Trend Qualification")
+st.caption("Every stock below shows the exact 1Y, 6M, 1M and 1W returns used to qualify it. S1/S2/S3 must select candidates only from the matching set.")
 show_set("BUY SET", buy_rows, "🟢")
 show_set("SELL SET", sell_rows, "🔴")
 
