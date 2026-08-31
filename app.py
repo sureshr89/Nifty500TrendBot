@@ -20,7 +20,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "ltp-decoupled-from-pdc-v5"
+APP_BUILD = "ad-close-fallback-v6"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -76,6 +76,7 @@ class DhanLiveClient:
                 "open": float(ohlc.get("open", ltp)),
                 "high": float(ohlc.get("high", ltp)),
                 "low": float(ohlc.get("low", ltp)),
+                "close": float(ohlc.get("close", ltp)),
             }
         return result
 
@@ -127,11 +128,25 @@ def trend_check(state):
                 stock["LTP"] = q["ltp"]
         except (TypeError, ValueError):
             pass
-    valid_ids = [sid for sid, q in live_quotes.items() if sid in pdc_by_id and q.get("ltp") is not None]
+    # Prefer saved PDC; otherwise use the previous-close value returned with
+    # the same Dhan OHLC quote batch. This keeps A/D live even when the scan
+    # state does not carry a PDC column.
+    resolved_pdc = {}
+    for sid, q in live_quotes.items():
+        pdc = pdc_by_id.get(sid)
+        if not pdc:
+            try:
+                pdc = float(q.get("close", 0))
+            except (TypeError, ValueError):
+                pdc = 0
+        if pdc and pdc > 0:
+            resolved_pdc[sid] = pdc
+
+    valid_ids = [sid for sid, q in live_quotes.items() if sid in resolved_pdc and q.get("ltp") is not None]
     valid_count = len(valid_ids)
-    advances = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] > pdc_by_id[sid])
-    declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < pdc_by_id[sid])
-    unchanged = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] == pdc_by_id[sid])
+    advances = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] > resolved_pdc[sid])
+    declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < resolved_pdc[sid])
+    unchanged = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] == resolved_pdc[sid])
     breadth_valid = valid_count >= 480
     ad_ratio = (advances / declines) if breadth_valid and declines > 0 else None
     ltp = market.get("ltp")
