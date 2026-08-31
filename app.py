@@ -88,18 +88,7 @@ def trend_check(state):
     market = dict(state.get("market", {}))
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
-    # Attach fresh Dhan LTP to stock-set rows for display and trigger comparison.
-    all_ids = [x.get("SecurityId") for x in buy_rows + sell_rows if x.get("SecurityId") is not None]
-    live_quotes = client.quotes(all_ids)
-    for stock in buy_rows + sell_rows:
-        try:
-            q = live_quotes.get(int(stock.get("SecurityId")))
-            if q:
-                stock["LTP"] = q["ltp"]
-        except (TypeError, ValueError):
-            pass
-    # LIVE A/D breadth: at least 480 valid Dhan quotes are required.
-    # Unchanged stocks are valid and excluded from advances/declines.
+    # Build live breadth universe and fetch NSE equities once per refresh.
     universe_rows = state.get("classified", []) or buy_rows + sell_rows
     universe_ids, pdc_by_id = [], {}
     for row in universe_rows:
@@ -111,9 +100,17 @@ def trend_check(state):
                 pdc_by_id[sid] = row_pdc
         except (TypeError, ValueError):
             continue
-    breadth_quotes = {}
-    for start in range(0, len(universe_ids), 1000):
-        breadth_quotes.update(client.quotes(universe_ids[start:start + 1000]))
+
+    live_quotes = client.quotes(sorted(set(universe_ids)), exchange_segment="NSE_EQ")
+
+    # Populate BUY/SELL table LTP from the same quote batch.
+    for stock in buy_rows + sell_rows:
+        try:
+            q = live_quotes.get(int(stock.get("SecurityId")))
+            if q:
+                stock["LTP"] = q["ltp"]
+        except (TypeError, ValueError):
+            pass
     valid_ids = [sid for sid, q in breadth_quotes.items() if sid in pdc_by_id and q.get("ltp") is not None]
     valid_count = len(valid_ids)
     advances = sum(1 for sid in valid_ids if breadth_quotes[sid]["ltp"] > pdc_by_id[sid])
