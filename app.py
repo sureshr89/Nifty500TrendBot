@@ -97,7 +97,28 @@ def trend_check(state):
                 stock["LTP"] = q["ltp"]
         except (TypeError, ValueError):
             pass
-    ad_ratio = float(market.get("ad_ratio", 1.0))
+    # LIVE A/D breadth: at least 480 valid Dhan quotes are required.
+    # Unchanged stocks are valid and excluded from advances/declines.
+    universe_rows = state.get("classified", []) or buy_rows + sell_rows
+    universe_ids, pdc_by_id = [], {}
+    for row in universe_rows:
+        try:
+            sid = int(row.get("SecurityId"))
+            row_pdc = float(row.get("PDC", row.get("pdc", 0)))
+            if row_pdc > 0:
+                universe_ids.append(sid)
+                pdc_by_id[sid] = row_pdc
+        except (TypeError, ValueError):
+            continue
+    breadth_quotes = {}
+    for start in range(0, len(universe_ids), 1000):
+        breadth_quotes.update(client.quotes(universe_ids[start:start + 1000]))
+    valid_count = len(breadth_quotes)
+    advances = sum(1 for sid, q in breadth_quotes.items() if sid in pdc_by_id and q["ltp"] > pdc_by_id[sid])
+    declines = sum(1 for sid, q in breadth_quotes.items() if sid in pdc_by_id and q["ltp"] < pdc_by_id[sid])
+    unchanged = sum(1 for sid, q in breadth_quotes.items() if sid in pdc_by_id and q["ltp"] == pdc_by_id[sid])
+    ad_ratio = (advances / declines) if valid_count >= 480 and declines > 0 else None
+    breadth_valid = valid_count >= 480
     ltp = market.get("ltp")
     pdc = market.get("pdc")
 
@@ -113,8 +134,8 @@ def trend_check(state):
     else:
         day_pct = market.get("day_pct", 0)
 
-    mode = "BUY" if day_pct > 0 and ad_ratio > 1 else ("SELL" if day_pct < 0 and ad_ratio < 1 else "NEUTRAL")
-    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "mode": mode})
+    mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
+    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 480, "breadth_valid": breadth_valid, "mode": mode})
 
     if "trend_runtime" not in st.session_state:
         st.session_state.trend_runtime = {"trades": [], "last_ltp": {}}
