@@ -20,7 +20,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "breadth-fix-480-v3"
+APP_BUILD = "breadth-fix-480-v4"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -92,7 +92,7 @@ def trend_check(state):
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
     # Build live breadth universe and fetch NSE equities once per refresh.
-    universe_rows = state.get("classified", []) or buy_rows + sell_rows
+    universe_rows = state.get("breadth_universe", []) or state.get("classified", []) or buy_rows + sell_rows
     universe_ids, pdc_by_id = [], {}
     for row in universe_rows:
         try:
@@ -303,7 +303,7 @@ m1.metric("NIFTY 500", market.get("ltp", "—"))
 m2.metric("Day %", f"{float(market.get('day_pct', 0)):.2f}%")
 m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
 
-st.caption(f"PDC: {market.get('pdc', '—')}  •  Last live check: {now_ist():%H:%M:%S IST}")
+st.caption(f"PDC: {market.get('pdc', '—')} • Breadth: {market.get('valid_breadth_stocks', 0)}/500 • Min: 480 • Adv: {market.get('advances', 0)} • Dec: {market.get('declines', 0)} • Unch: {market.get('unchanged', 0)} • Last live check: {now_ist():%H:%M:%S IST}")
 
 st.divider()
 st.subheader("🎯 Strategy Status — S1 / S2 / S3")
