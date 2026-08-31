@@ -84,7 +84,6 @@ def _history(client, security_id):
         "oi": False,
         "fromDate": start.isoformat(),
         "toDate": end.isoformat(),
-        "interval": "D",
     }
     data = client.post("/charts/historical", payload)
     data = data.get("data", data)
