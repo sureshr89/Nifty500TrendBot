@@ -19,6 +19,10 @@ def write_state(state):
 def premarket():
     result = scan_nifty500()
     result["classified"].to_csv(RANKING_FILE, index=False)
+
+    # Keep every NIFTY 500 member for live A/D. Historical trend failures must
+    # not shrink the live breadth universe.
+    breadth_universe = result["classified"].copy()
     state = {
         "health": {
             "worker_status": "ok",
@@ -27,6 +31,7 @@ def premarket():
         },
         "market": result["market"],
         "classified": result["classified"].to_dict(orient="records"),
+        "breadth_universe": breadth_universe.to_dict(orient="records"),
         "buy_set": result["buy_set"].to_dict(orient="records"),
         "sell_set": result["sell_set"].to_dict(orient="records"),
         "scan_errors": result["errors"],
