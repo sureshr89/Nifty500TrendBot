@@ -1,8 +1,8 @@
-"""Active Streamlit dashboard and 15-second S1 paper-trading worker.
+"""Active Streamlit dashboard and 15-second S1/S2/S3 paper-trading worker.
 
 Pre-market BUY/SELL sets and PDH/PDL are read from the bot-state branch.
 When the Streamlit app is active, this app fetches fresh Dhan market data every
-15 seconds and evaluates the S1 paper-trading strategy.
+15 seconds and evaluates the S1/S2/S3 paper-trading strategies.
 """
 
 import json
