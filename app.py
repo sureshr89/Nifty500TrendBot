@@ -246,7 +246,7 @@ def trend_check(state):
 
                 # S2: Open between PDL/PDH, low 0.15% below PDC, reclaim PDL.
                 if not entry_made:
-                    s2 = pdl < q["open"] < pdh and q["low"] <= pdc * 0.9985 and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
+                    s2 = pdl < q["open"] < pdh and q["low"] <= pdl * 0.9985 and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
                     if s2:
                         sl = q["low"]
                         risk = q["ltp"] - sl
@@ -275,7 +275,7 @@ def trend_check(state):
 
                 # S2: Open between PDL/PDH, high 0.15% above PDC, break below PDL.
                 if not entry_made:
-                    s2 = pdl < q["open"] < pdh and q["high"] >= pdc * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
+                    s2 = pdl < q["open"] < pdh and q["high"] >= pdl * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                     if s2:
                         sl = q["high"]
                         risk = sl - q["ltp"]
@@ -355,7 +355,7 @@ s1b.metric("Pullback", "0.15%")
 s1c.metric("Square-off", "14:55")
 
 st.caption("S1 BUY: Open > PDH → Low ≤ PDH − 0.15% → reclaim PDH | S1 SELL: Open < PDL → High ≥ PDL + 0.15% → break PDL")
-st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDC − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDC + 0.15% → break PDL")
+st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDL + 0.15% → break PDL")
 st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R")
 
 open_trade = next((t for t in trades if t.get("status") == "OPEN"), None)
