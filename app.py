@@ -20,7 +20,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "ad-close-fallback-v6"
+APP_BUILD = "ad-previous-close-v7"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -71,12 +71,17 @@ class DhanLiveClient:
             ltp = row.get("last_price")
             if ltp is None:
                 continue
+            previous_close = row.get("previous_close")
+            if previous_close is None:
+                previous_close = row.get("prev_close")
+            if previous_close is None:
+                previous_close = ohlc.get("previous_close")
             result[int(sid)] = {
                 "ltp": float(ltp),
                 "open": float(ohlc.get("open", ltp)),
                 "high": float(ohlc.get("high", ltp)),
                 "low": float(ohlc.get("low", ltp)),
-                "close": float(ohlc.get("close", ltp)),
+                "previous_close": float(previous_close) if previous_close not in (None, "") else None,
             }
         return result
 
@@ -136,7 +141,7 @@ def trend_check(state):
         pdc = pdc_by_id.get(sid)
         if not pdc:
             try:
-                pdc = float(q.get("close", 0))
+                pdc = float(q.get("previous_close", 0) or 0)
             except (TypeError, ValueError):
                 pdc = 0
         if pdc and pdc > 0:
@@ -339,7 +344,7 @@ m1.metric("NIFTY 500", market.get("ltp", "—"))
 m2.metric("Day %", f"{float(market.get('day_pct', 0)):.2f}%")
 m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
 
-st.caption(f"PDC: {market.get('pdc', '—')} • Breadth: {market.get('valid_breadth_stocks', 0)}/500 • Min: 480 • Adv: {market.get('advances', 0)} • Dec: {market.get('declines', 0)} • Unch: {market.get('unchanged', 0)} • Last live check: {now_ist():%H:%M:%S IST}")
+st.caption(f"PDC: {market.get('pdc', '—')} • Breadth: {market.get('valid_breadth_stocks', 0)} valid quotes • Adv: {market.get('advances', 0)} • Dec: {market.get('declines', 0)} • Unch: {market.get('unchanged', 0)} • Last live check: {now_ist():%H:%M:%S IST}")
 
 st.divider()
 st.subheader("🎯 Strategy Status — S1 / S2 / S3")
