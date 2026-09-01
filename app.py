@@ -757,14 +757,17 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
             sid = int(row.get("SecurityId"))
         except (TypeError, ValueError):
             continue
-        # Quote values are refreshed inside trend_check; the dashboard section
-        # reads the latest LTP written back into the shared state rows.
-        live_ltp = row.get("LTP", row.get("ltp"))
+        # The live table must use the SAME fresh quote snapshot used by A/D.
+        # Rows in scan_state are static and do not themselves contain refreshed LTP.
+        q = live_quotes.get(sid, {})
+        live_ltp = q.get("ltp")
+        row_pdc = q.get("previous_close")
+        if row_pdc is None:
+            row_pdc = row.get("PDC", row.get("pdc"))
         try:
             live_ltp = float(live_ltp) if live_ltp not in (None, "") else None
         except (TypeError, ValueError):
             live_ltp = None
-        row_pdc = row.get("PDC", row.get("pdc"))
         try:
             row_pdc = float(row_pdc) if row_pdc not in (None, "") else None
         except (TypeError, ValueError):
