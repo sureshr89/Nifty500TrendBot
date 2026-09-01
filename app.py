@@ -301,15 +301,24 @@ def trend_check(state):
         )
         quotes = live_quotes
 
-        RISK_PER_TRADE = 1500.0
+        MIN_RISK_PER_TRADE = 1000.0
+        MAX_RISK_PER_TRADE = 1500.0
 
         def open_position(strategy, side, stock, sid, q, sl, target):
             entry = float(q["ltp"])
             risk_per_share = (entry - sl) if side == "BUY" else (sl - entry)
             if risk_per_share <= 0:
                 return False
-            quantity = int(RISK_PER_TRADE // risk_per_share)
+
+            # Use the largest whole-share quantity that stays within the
+            # maximum risk, thereby getting as close as possible to ₹1,500.
+            quantity = int(MAX_RISK_PER_TRADE // risk_per_share)
             if quantity < 1:
+                return False
+            actual_risk = quantity * risk_per_share
+
+            # Trades below ₹1,000 intended risk are not accepted.
+            if actual_risk < MIN_RISK_PER_TRADE or actual_risk > MAX_RISK_PER_TRADE:
                 return False
             trades.append({
                 "strategy": strategy, "side": side, "status": "OPEN",
@@ -318,7 +327,7 @@ def trend_check(state):
                 "sector_ad": candidate_sector_ad(stock),
                 "entry_price": entry, "quantity": quantity,
                 "risk_per_share": risk_per_share,
-                "risk_amount": quantity * risk_per_share,
+                "risk_amount": actual_risk,
                 "PDH": float(stock["PDH"]),
                 "PDL": float(stock["PDL"]), "PDC": float(stock.get("PDC", 0)),
                 "SL": sl, "target": target,
