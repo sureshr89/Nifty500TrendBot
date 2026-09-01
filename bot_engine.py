@@ -151,7 +151,7 @@ def load_dhan_broad_index_ids():
         raise RuntimeError("Dhan security master missing SECURITY_ID")
     name_cols = [x for x in ["DISPLAY_NAME", "UNDERLYING_SYMBOL", "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME"] if x in master.columns]
     aliases = {
-        "Nifty 50": ["NIFTY 50", "NIFTY"],
+        "Nifty 50": ["NIFTY 50"],
         "Nifty Next 50": ["NIFTY NEXT 50", "NIFTY NEXT50"],
         "Nifty Midcap 150": ["NIFTY MIDCAP 150", "NIFTY MIDCAP150"],
         "Nifty Smallcap 250": ["NIFTY SMALLCAP 250", "NIFTY SMALLCAP250"],
@@ -168,6 +168,18 @@ def load_dhan_broad_index_ids():
                 mask = mask | normalized[col].eq(choice)
             rows = master[mask]
             if len(rows):
+                # Prefer an explicit index segment when the Dhan master provides it.
+                segment_cols = [x for x in ["SEM_SEGMENT", "EXCHANGE_SEGMENT", "INSTRUMENT", "INSTRUMENT_TYPE"] if x in rows.columns]
+                if segment_cols:
+                    index_mask = pd.Series(False, index=rows.index)
+                    for col in segment_cols:
+                        values = rows[col].astype(str).str.upper()
+                        index_mask = index_mask | values.str.contains("IDX|INDEX", regex=True, na=False)
+                    index_rows = rows[index_mask]
+                    if len(index_rows):
+                        rows = index_rows
+                if len(rows) != 1:
+                    raise RuntimeError(f"Ambiguous Dhan index match for {label}; refusing to guess")
                 hit = rows.iloc[0]
                 break
         if hit is None:
@@ -265,7 +277,7 @@ def scan_nifty500():
     strategy_frame.loc[(strategy_frame[periods] > 0).all(axis=1), "Trend"] = "BULLISH"
     strategy_frame.loc[(strategy_frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
 
-    advances, declines, ad_ratio = calculate_advance_decline(strategy_frame)
+    advances, declines, ad_ratio = calculate_advance_decline(frame)
     index_basis = fetch_broad_market_indices(client)
     nifty500 = index_basis["Nifty 500"]
     ltp, pdc, day_pct, nifty_security_id = nifty500["ltp"], nifty500["pdc"], nifty500["day_pct"], nifty500["security_id"]
