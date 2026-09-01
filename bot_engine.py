@@ -201,6 +201,11 @@ def add_s1_levels(frame):
 def scan_nifty500():
     client = DhanClient()
     universe = load_nifty500_universe()
+    if len(universe) != 500:
+        raise RuntimeError(f"NIFTY 500 universe must contain exactly 500 mapped stocks; got {len(universe)}")
+    universe = universe.drop_duplicates(subset=["SecurityId"]).copy()
+    if len(universe) != 500:
+        raise RuntimeError(f"NIFTY 500 universe must contain 500 unique Security IDs; got {len(universe)}")
     rows, errors = [], []
 
     for _, stock in universe.iterrows():
