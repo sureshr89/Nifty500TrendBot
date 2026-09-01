@@ -334,7 +334,9 @@ def trend_check(state):
             pdh, pdl, pdc = float(stock.get("PDH", 0)), float(stock.get("PDL", 0)), float(stock.get("PDC", 0))
             if pdh <= 0 or pdl <= 0 or pdc <= 0:
                 continue
-            prev_ltp = runtime["last_ltp"].get(sid)
+            # JSON persistence converts dict keys to strings, so support both
+            # in-memory integer keys and persisted string keys.
+            prev_ltp = runtime["last_ltp"].get(str(sid), runtime["last_ltp"].get(sid))
             sector = str(stock.get("Sector") or stock.get("Industry") or "").strip()
             sector_stats = sector_breadth.get(sector)
             sector_ad = sector_stats.get("ad_ratio") if sector_stats else None
@@ -343,7 +345,7 @@ def trend_check(state):
                 or (mode == "SELL" and sector_ad is not None and sector_ad < 1)
             )
             if not sector_bias_ok:
-                runtime["last_ltp"][sid] = q["ltp"]
+                runtime["last_ltp"][str(sid)] = q["ltp"]
                 continue
             entry_made = False
             open_strategies = {t["strategy"] for t in trades if t["status"] == "OPEN"}
@@ -419,7 +421,7 @@ def trend_check(state):
                             if risk > 0:
                                 entry_made = open_position("S4", "SELL", stock, sid, q, sl, q["ltp"] - 1.25 * risk)
 
-            runtime["last_ltp"][sid] = q["ltp"]
+            runtime["last_ltp"][str(sid)] = q["ltp"]
             if entry_made:
                 break
 
