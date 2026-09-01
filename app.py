@@ -749,16 +749,26 @@ with st.expander("🏢 Sector A/D",expanded=False):
 
 # 7 FULL NIFTY 500 LIVE DATA - COLLAPSIBLE
 st.divider()
-with st.expander(f"📋 Full NIFTY 500 Live Data ({len(universe_rows)} mapped)",expanded=False):
+dashboard_universe_rows = state.get("breadth_universe", []) or state.get("classified", []) or buy_rows + sell_rows
+with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)} mapped)",expanded=False):
     all_stock_rows = []
-    for row in universe_rows:
+    for row in dashboard_universe_rows:
         try:
             sid = int(row.get("SecurityId"))
         except (TypeError, ValueError):
             continue
-        q = live_quotes.get(sid, {})
-        live_ltp = q.get("ltp")
-        row_pdc = resolved_pdc.get(sid)
+        # Quote values are refreshed inside trend_check; the dashboard section
+        # reads the latest LTP written back into the shared state rows.
+        live_ltp = row.get("LTP", row.get("ltp"))
+        try:
+            live_ltp = float(live_ltp) if live_ltp not in (None, "") else None
+        except (TypeError, ValueError):
+            live_ltp = None
+        row_pdc = row.get("PDC", row.get("pdc"))
+        try:
+            row_pdc = float(row_pdc) if row_pdc not in (None, "") else None
+        except (TypeError, ValueError):
+            row_pdc = None
         pdh = row.get("PDH", row.get("pdh"))
         pdl = row.get("PDL", row.get("pdl"))
         if live_ltp is not None and row_pdc not in (None, 0):
@@ -784,8 +794,8 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(universe_rows)} mapped)",
     if not all_stocks_df.empty:
         st.caption(
             f"Mapped: {len(all_stocks_df)} • Live LTP: {int(all_stocks_df['LTP'].notna().sum())} • "
-            f"Valid LTP + PDC: {valid_count} • Advancing: {advances} • "
-            f"Declining: {declines} • Unchanged: {unchanged}"
+            f"Valid LTP + PDC: {market.get('valid_breadth_stocks',0)} • Advancing: {market.get('advances',0)} • "
+            f"Declining: {market.get('declines',0)} • Unchanged: {market.get('unchanged',0)}"
         )
         st.dataframe(all_stocks_df,use_container_width=True,hide_index=True)
     else:
