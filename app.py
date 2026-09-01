@@ -632,11 +632,13 @@ with st.expander("🏢 Sector A/D",expanded=False):
     else:
         st.caption("Sector A/D data will appear with live valid quotes.")
 
-# 7 FULL BACKTEST / 360 ANALYSIS - COLLAPSIBLE + DOWNLOADS
+# 7 LIGHTWEIGHT EOD / BACKTEST DOWNLOAD
+# Keep the website fast: analysis is exported to one Excel workbook and is not
+# rendered as multiple heavy tables in the Streamlit page.
 st.divider()
-with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
+with st.expander("📥 EOD / Full 360° Analysis Download",expanded=False):
     if adf.empty:
-        st.caption("This section builds automatically as persistent trade history grows.")
+        st.caption("No trade history yet. The complete Excel analysis will build automatically as trades are recorded.")
     else:
         x=adf.copy()
         x["Entry DateTime"]=pd.to_datetime(x["Entry Time"],errors="coerce")
@@ -648,18 +650,15 @@ with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
         x["Win"]=x["P&L"]>0
         x["Loss"]=x["P&L"]<0
 
-        st.markdown("**Month-wise Performance**")
         monthly=[]
         for month,g in x.dropna(subset=["Month"]).groupby("Month"):
             closed=g[g["Closed Trade"]]
             wins=int((closed["P&L"]>0).sum()); losses=int((closed["P&L"]<0).sum())
-            gross_profit=float(closed.loc[closed["P&L"]>0,"P&L"].sum())
-            gross_loss=float(closed.loc[closed["P&L"]<0,"P&L"].sum())
+            gp=float(closed.loc[closed["P&L"]>0,"P&L"].sum()); gl=float(closed.loc[closed["P&L"]<0,"P&L"].sum())
             monthly.append({
                 "Month":month,"Trades":len(g),"Closed":len(closed),"Open":int((~g["Closed Trade"]).sum()),
                 "Wins":wins,"Losses":losses,"Win %":wins/len(closed)*100 if len(closed) else 0,
-                "Gross Profit":gross_profit,"Gross Loss":gross_loss,
-                "Profit Factor":gross_profit/abs(gross_loss) if gross_loss else 0,
+                "Gross Profit":gp,"Gross Loss":gl,"Profit Factor":gp/abs(gl) if gl else 0,
                 "Realized P&L":float(closed["P&L"].sum()),"Live P&L":float(g.loc[~g["Closed Trade"],"P&L"].sum()),
                 "Total P&L":float(g["P&L"].sum()),"Average P&L":float(g["P&L"].mean()),
                 "Best Trade":float(g["P&L"].max()),"Worst Trade":float(g["P&L"].min()),
@@ -668,9 +667,7 @@ with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
                 "Avg Return %":float(g["Return %"].mean()),"Total Risk Amount":float(g["Risk Amount"].sum())
             })
         monthly_df=pd.DataFrame(monthly)
-        st.dataframe(monthly_df,use_container_width=True,hide_index=True)
 
-        st.markdown("**Strategy-wise Analysis**")
         strategy=[]
         for name,g in x.groupby("Strategy"):
             closed=g[g["Closed Trade"]]
@@ -687,37 +684,23 @@ with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
                 "Avg Risk":float(g["Risk Amount"].mean())
             })
         strategy_df=pd.DataFrame(strategy).sort_values("Total P&L",ascending=False)
-        st.dataframe(strategy_df,use_container_width=True,hide_index=True)
 
-        st.markdown("**Stock-wise Analysis**")
         stock_df=(x.groupby(["Symbol","Stock Name","Side"],dropna=False)
             .agg(Trades=("Symbol","size"),Closed=("Closed Trade","sum"),Wins=("Win","sum"),Losses=("Loss","sum"),
                  Total_PnL=("P&L","sum"),Avg_PnL=("P&L","mean"),Best_Trade=("P&L","max"),Worst_Trade=("P&L","min"),
                  Avg_Return_pct=("Return %","mean"),Avg_Capital=("Capital Used","mean"),Total_Capital=("Capital Used","sum"),
-                 Avg_Risk=("Risk Amount","mean"))
-            .reset_index())
+                 Avg_Risk=("Risk Amount","mean")).reset_index())
         stock_df["Win %"]=stock_df.apply(lambda r:(r["Wins"]/r["Closed"]*100) if r["Closed"] else 0,axis=1)
-        st.dataframe(stock_df.sort_values("Total_PnL",ascending=False),use_container_width=True,hide_index=True)
 
-        st.markdown("**Exit Reason Analysis**")
         exit_df=(x.groupby(["Exit Reason","Status"],dropna=False)
             .agg(Trades=("Status","size"),Total_PnL=("P&L","sum"),Average_PnL=("P&L","mean"),
-                 Best=("P&L","max"),Worst=("P&L","min"))
-            .reset_index())
-        st.dataframe(exit_df,use_container_width=True,hide_index=True)
+                 Best=("P&L","max"),Worst=("P&L","min")).reset_index())
 
-        st.markdown("**Side-wise Analysis**")
         side_df=(x.groupby("Side")
             .agg(Trades=("Side","size"),Total_PnL=("P&L","sum"),Average_PnL=("P&L","mean"),
                  Best=("P&L","max"),Worst=("P&L","min"),Avg_Capital=("Capital Used","mean"),
-                 Avg_Return_pct=("Return %","mean"))
-            .reset_index())
-        st.dataframe(side_df,use_container_width=True,hide_index=True)
+                 Avg_Return_pct=("Return %","mean")).reset_index())
 
-        st.markdown("**Full Trade-Level Backtest Data**")
-        st.dataframe(x.drop(columns=["Entry DateTime","Exit DateTime","Closed Trade","Win","Loss"],errors="ignore"),use_container_width=True,hide_index=True)
-
-        # One complete Excel workbook for your own analysis. All analysis is in separate sheets.
         import io
         export_buffer=io.BytesIO()
         with pd.ExcelWriter(export_buffer,engine="openpyxl") as writer:
@@ -727,8 +710,10 @@ with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
             stock_df.to_excel(writer,index=False,sheet_name="Stock Analysis")
             exit_df.to_excel(writer,index=False,sheet_name="Exit Analysis")
             side_df.to_excel(writer,index=False,sheet_name="Buy Sell Analysis")
+
+        st.caption("All detailed backtest and 360° analysis stays inside one Excel file to keep this website fast and clean.")
         st.download_button(
-            "📥 Download Complete 360° Analysis",
+            "📥 Download Complete EOD / 360° Analysis",
             data=export_buffer.getvalue(),
             file_name="nifty500_complete_360_analysis.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
