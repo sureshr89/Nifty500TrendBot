@@ -444,9 +444,11 @@ st.markdown("""
 <style>
 .block-container {max-width:1200px;padding-top:0.8rem;padding-bottom:2rem;}
 div[data-testid="stExpander"] {border-radius:12px;}
-.metric-card{background:rgba(128,128,128,.10);border:1px solid rgba(128,128,128,.20);border-radius:12px;padding:10px 12px;margin:4px 0;min-height:76px;}
-.metric-label{font-size:.78rem;opacity:.72;margin-bottom:5px;}
-.metric-value{font-size:1.08rem;font-weight:700;word-break:break-word;}
+.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%;margin:6px 0 10px;}
+.metric-card{box-sizing:border-box;background:rgba(128,128,128,.10);border:1px solid rgba(128,128,128,.20);border-radius:10px;padding:8px 7px;min-height:68px;margin:0;overflow:hidden;}
+.metric-label{font-size:.68rem;opacity:.72;margin-bottom:5px;line-height:1.1;}
+.metric-value{font-size:.98rem;font-weight:700;word-break:break-word;line-height:1.15;}
+@media (max-width: 480px){.metric-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}.metric-card{padding:8px 6px;min-height:64px;}.metric-label{font-size:.62rem;}.metric-value{font-size:.88rem;}}
 </style>
 """,unsafe_allow_html=True)
 
@@ -526,10 +528,13 @@ def stats(items):
     }
 
 def cards(pairs, cols=3):
-    for i in range(0,len(pairs),cols):
-        row=st.columns(cols)
-        for j,(label,value) in enumerate(pairs[i:i+cols]):
-            row[j].markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>',unsafe_allow_html=True)
+    # HTML/CSS grid is used instead of st.columns because Streamlit stacks
+    # columns vertically on narrow mobile screens.
+    html='<div class="metric-grid">'
+    for label,value in pairs:
+        html += f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>'
+    html+='</div>'
+    st.markdown(html,unsafe_allow_html=True)
 
 # 1 LIVE MARKET
 st.subheader("📊 Live Market")
