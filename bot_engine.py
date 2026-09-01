@@ -240,6 +240,9 @@ def scan_nifty500():
             "mode": mode,
             "security_id": nifty_security_id,
         },
+        # Keep the complete 500-member universe separate from the scan-success
+        # frame. Historical scan failures must never shrink live A/D coverage.
+        "breadth_universe": universe.copy(),
         "classified": frame,
         "buy_set": frame[frame["Trend"].eq("BULLISH")].copy(),
         "sell_set": frame[frame["Trend"].eq("BEARISH")].copy(),
