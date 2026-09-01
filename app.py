@@ -563,19 +563,24 @@ adf=trade_df(trades)
 s=stats(today_items)
 cs=stats(trades)
 
-# 3 TODAY PERFORMANCE - COLLAPSIBLE + CARDS
+# 3 TODAY PERFORMANCE — SUMMARY FIRST, TRADE TABLE SEPARATE COLLAPSE
 st.divider()
-with st.expander("📅 Today's Performance",expanded=True):
+st.subheader("📅 Today's Performance")
+
+# Always-visible summary first for quick mobile viewing
+cards([
+    ("Trades Taken",s["taken"]),("Open",s["open"]),("Closed",s["closed"]),
+    ("Wins",s["wins"]),("Losses",s["losses"]),("Win %",f"{s['winpct']:.2f}%"),
+    ("Realized P&L",f"₹{s['realized']:,.2f}"),("Live P&L",f"₹{s['live']:,.2f}"),("Total P&L",f"₹{s['realized']+s['live']:,.2f}"),
+    ("Max Capital Used",f"₹{s['maxcap']:,.2f}"),("Min Capital Used",f"₹{s['mincap']:,.2f}")
+],3)
+
+# Full trade details only when requested
+with st.expander(f"📂 Show Today's Trade Details ({len(today_items)} trades)",expanded=False):
     if tdf.empty:
         st.caption("No trades taken today.")
     else:
         st.dataframe(tdf,use_container_width=True,hide_index=True)
-    cards([
-        ("Trades Taken",s["taken"]),("Open",s["open"]),("Closed",s["closed"]),
-        ("Wins",s["wins"]),("Losses",s["losses"]),("Win %",f"{s['winpct']:.2f}%"),
-        ("Realized P&L",f"₹{s['realized']:,.2f}"),("Live P&L",f"₹{s['live']:,.2f}"),("Total P&L",f"₹{s['realized']+s['live']:,.2f}"),
-        ("Max Capital Used",f"₹{s['maxcap']:,.2f}"),("Min Capital Used",f"₹{s['mincap']:,.2f}")
-    ],3)
 
 # 4 ALL TRADES + CUMULATIVE CARDS
 st.divider()
