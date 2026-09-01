@@ -1,0 +1,50 @@
+name: NIFTY 500 Pre-Market Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+      DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run NIFTY 500 scan
+        run: python run_scan.py
+
+      - name: Publish scan state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin bot-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/bot-state; then
+            git checkout -B bot-state origin/bot-state
+          else
+            git checkout --orphan bot-state
+            git rm -rf . || true
+          fi
+          git checkout main -- scan_state.json
+          git add scan_state.json
+          git commit -m "Update NIFTY 500 scan state" || exit 0
+          git push origin bot-state
