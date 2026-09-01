@@ -77,6 +77,10 @@ class DhanLiveClient:
                 previous_close = row.get("prev_close")
             if previous_close is None:
                 previous_close = ohlc.get("previous_close")
+            # Dhan OHLC commonly exposes the previous/session close as
+            # ohlc.close; use it as the final PDC fallback.
+            if previous_close is None:
+                previous_close = ohlc.get("close")
             result[int(sid)] = {
                 "ltp": float(ltp),
                 "open": float(ohlc.get("open", ltp)),
