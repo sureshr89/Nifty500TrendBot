@@ -158,27 +158,37 @@ def load_persisted_trades():
     return {"trades": data.get("trades", []), "last_ltp": data.get("last_ltp", {}), "_sha": payload.get("sha")}
 
 def persist_trades(runtime):
+    """Persist trades without allowing a stale/empty runtime to erase history."""
     token = st.secrets.get("GITHUB_TOKEN")
     if not token:
         return
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"}
     current = requests.get(_github_trade_state_url(), headers=headers, params={"ref": "bot-state"}, timeout=15)
-    sha = None
+    sha, stored = None, {"trades": [], "last_ltp": {}}
     if current.status_code == 200:
-        sha = current.json().get("sha")
+        payload = current.json()
+        sha = payload.get("sha")
+        try:
+            stored = json.loads(base64.b64decode(payload["content"]).decode("utf-8"))
+        except Exception:
+            return
     elif current.status_code != 404:
         current.raise_for_status()
-    data = {"trades": runtime.get("trades", []), "last_ltp": runtime.get("last_ltp", {})}
-    body = {
-        "message": "Persist paper trade state",
-        "content": base64.b64encode(json.dumps(data, separators=(",", ":")).encode("utf-8")).decode("ascii"),
-        "branch": "bot-state",
+    incoming = runtime.get("trades", []) or []
+    existing = stored.get("trades", []) or []
+    merged = {}
+    for t in existing + incoming:
+        key = str(t.get("id") or "|".join([str(t.get("symbol", "")), str(t.get("side", "")), str(t.get("strategy", "")), str(t.get("entry_time", t.get("entry_at", ""))), str(t.get("entry_price", ""))]))
+        merged[key] = {**merged.get(key, {}), **t}
+    data = {
+        "trades": list(merged.values()),
+        "last_ltp": {**(stored.get("last_ltp", {}) or {}), **(runtime.get("last_ltp", {}) or {})},
     }
+    body = {"message": "Persist paper trade state (history protected)", "content": base64.b64encode(json.dumps(data, separators=(",", ":")).encode("utf-8")).decode("ascii"), "branch": "bot-state"}
     if sha:
         body["sha"] = sha
     response = requests.put(_github_trade_state_url(), headers=headers, json=body, timeout=15)
     response.raise_for_status()
-
 def clean_trade_history(trades):
     """Keep only trades matching the current clean sizing rules."""
     cleaned = []
@@ -393,7 +403,8 @@ def trend_check(state):
         persisted = load_persisted_trades()
         persisted = persisted if persisted is not None else {"trades": [], "last_ltp": {}}
         original_trades = persisted.get("trades", [])
-        persisted["trades"] = clean_trade_history(original_trades)
+        # Never automatically delete history during startup/refresh.
+        persisted["trades"] = original_trades
         st.session_state.trend_runtime = persisted
         if len(persisted["trades"]) != len(original_trades):
             persist_trades(persisted)
