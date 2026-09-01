@@ -215,7 +215,8 @@ def trend_check(state):
     declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < resolved_pdc[sid])
     unchanged = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] == resolved_pdc[sid])
 
-    # Live sector-wise A/D for the same NIFTY 500 breadth universe.
+    # Live sector-wise A/D for the FULL valid NIFTY 500 breadth universe.
+    # Strategy Buy/Sell candidate sets are never used as the sector A/D source.
     sector_by_id = {}
     for row in universe_rows:
         try:
@@ -607,6 +608,12 @@ st.dataframe(pd.DataFrame([{
     "NIFTY 500 A/D":market.get("ad_ratio","—"),
     "Bias":mode
 }]),use_container_width=True,hide_index=True)
+st.caption(
+    f"Market Breadth • Advancing: {market.get('advances',0)} • "
+    f"Declining: {market.get('declines',0)} • "
+    f"Unchanged: {market.get('unchanged',0)} • "
+    f"Stocks Used for A/D: {market.get('valid_breadth_stocks',0)} / 500"
+)
 
 # 2 STRATEGY REFERENCE - COLLAPSIBLE
 st.divider()
@@ -687,9 +694,29 @@ st.divider()
 with st.expander("🏢 Sector A/D",expanded=False):
     sb=market.get("sector_breadth",{})
     if sb:
-        sdf=pd.DataFrame([{"Sector":name,**vals} for name,vals in sb.items()])
-        if "ad_ratio" in sdf.columns: sdf=sdf.sort_values("ad_ratio",ascending=False)
+        sdf=pd.DataFrame([{
+            "Sector": name,
+            "Advancing": vals.get("advances",0),
+            "Declining": vals.get("declines",0),
+            "Unchanged": vals.get("unchanged",0),
+            "Stocks Used": vals.get("valid",0),
+            "A/D": vals.get("ad_ratio")
+        } for name,vals in sb.items()])
+        if "A/D" in sdf.columns:
+            sdf=sdf.sort_values("A/D",ascending=False,na_position="last")
         st.dataframe(sdf,use_container_width=True,hide_index=True)
+        mapped_sectors=len(sb)
+        sectors_with_valid=sum(1 for vals in sb.values() if vals.get("valid",0)>0)
+        total_used=sum(int(vals.get("valid",0) or 0) for vals in sb.values())
+        total_adv=sum(int(vals.get("advances",0) or 0) for vals in sb.values())
+        total_dec=sum(int(vals.get("declines",0) or 0) for vals in sb.values())
+        total_unch=sum(int(vals.get("unchanged",0) or 0) for vals in sb.values())
+        st.caption(
+            f"Sector Breadth Coverage • Total Sectors: {mapped_sectors} • "
+            f"Sectors with Valid Data: {sectors_with_valid} • "
+            f"Advancing: {total_adv} • Declining: {total_dec} • "
+            f"Unchanged: {total_unch} • Stocks Used for Sector A/D: {total_used}"
+        )
     else:
         st.caption("Sector A/D data will appear with live valid quotes.")
 
