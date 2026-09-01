@@ -707,10 +707,21 @@ with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
         st.markdown("**Full Trade-Level Backtest Data**")
         st.dataframe(x.drop(columns=["Entry DateTime","Exit DateTime","Closed Trade","Win","Loss"],errors="ignore"),use_container_width=True,hide_index=True)
 
-        full_csv=x.drop(columns=["Entry DateTime","Exit DateTime"],errors="ignore").to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Download Full 360° Backtest CSV",full_csv,"nifty500_full_backtest_360.csv","text/csv")
-        st.download_button("📥 Download Month-wise Analysis CSV",monthly_df.to_csv(index=False).encode("utf-8"),"nifty500_monthly_analysis.csv","text/csv")
-        st.download_button("📥 Download Strategy Analysis CSV",strategy_df.to_csv(index=False).encode("utf-8"),"nifty500_strategy_analysis.csv","text/csv")
-        st.download_button("📥 Download Stock-wise Analysis CSV",stock_df.to_csv(index=False).encode("utf-8"),"nifty500_stock_analysis.csv","text/csv")
+        # One complete Excel workbook for your own analysis. All analysis is in separate sheets.
+        import io
+        export_buffer=io.BytesIO()
+        with pd.ExcelWriter(export_buffer,engine="openpyxl") as writer:
+            x.drop(columns=["Entry DateTime","Exit DateTime"],errors="ignore").to_excel(writer,index=False,sheet_name="All Trades")
+            monthly_df.to_excel(writer,index=False,sheet_name="Monthly Analysis")
+            strategy_df.to_excel(writer,index=False,sheet_name="Strategy Analysis")
+            stock_df.to_excel(writer,index=False,sheet_name="Stock Analysis")
+            exit_df.to_excel(writer,index=False,sheet_name="Exit Analysis")
+            side_df.to_excel(writer,index=False,sheet_name="Buy Sell Analysis")
+        st.download_button(
+            "📥 Download Complete 360° Analysis",
+            data=export_buffer.getvalue(),
+            file_name="nifty500_complete_360_analysis.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 st.caption("Live and closed trades are not deleted by this dashboard. This update only adds mobile-friendly display, analysis and downloads; entry, exit, SL, target, timing, sector filtering and risk logic remain unchanged.")
