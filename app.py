@@ -9,9 +9,7 @@ import json
 import time
 import base64
 from datetime import datetime
-from io import StringIO, BytesIO
-import zipfile
-from datetime import timedelta
+from io import StringIO
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -24,50 +22,10 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "dhan-authoritative-live-v3"
+APP_BUILD = "dhan-live-only-v4"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
-
-@st.cache_data(ttl=21600, show_spinner=False)
-def load_previous_day_ranges():
-    """Previous completed NSE equity session HIGH/LOW; cached, not a live scan."""
-    headers = {"User-Agent": "Mozilla/5.0"}
-    today = datetime.now().date()
-    for offset in range(1, 12):
-        d = today - timedelta(days=offset)
-        if d.weekday() >= 5:
-            continue
-        stamp = d.strftime("%d%b%Y").upper()
-        url = f"https://nsearchives.nseindia.com/content/historical/EQUITIES/{d:%Y}/{d.strftime('%b').upper()}/cm{stamp}bhav.csv.zip"
-        try:
-            r = requests.get(url, headers=headers, timeout=20)
-            if r.status_code != 200:
-                continue
-            with zipfile.ZipFile(BytesIO(r.content)) as z:
-                csv_files = [n for n in z.namelist() if n.lower().endswith(".csv")]
-                if not csv_files:
-                    continue
-                raw = pd.read_csv(z.open(csv_files[0]))
-            cols = {x.upper().strip(): x for x in raw.columns}
-            sym_col = cols.get("SYMBOL")
-            high_col = cols.get("HIGH") or cols.get("HIGH_PRICE")
-            low_col = cols.get("LOW") or cols.get("LOW_PRICE")
-            series_col = cols.get("SERIES")
-            if not sym_col or not high_col or not low_col:
-                continue
-            df = raw.copy()
-            if series_col:
-                df = df[df[series_col].astype(str).str.upper().eq("EQ")]
-            df["Symbol"] = df[sym_col].astype(str).str.upper().str.strip()
-            df["PDH"] = pd.to_numeric(df[high_col], errors="coerce")
-            df["PDL"] = pd.to_numeric(df[low_col], errors="coerce")
-            df = df.dropna(subset=["PDH","PDL"]).drop_duplicates("Symbol")
-            return df.set_index("Symbol")[["PDH","PDL"]].to_dict("index")
-        except Exception:
-            continue
-    # Fallback: previous-day range already stored for strategy/classified rows.
-    return {}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_full_nifty500_universe():
