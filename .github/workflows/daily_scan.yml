@@ -37,6 +37,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          test -f scan_state.json
+          cp scan_state.json "$RUNNER_TEMP/scan_state.json"
           git fetch origin bot-state || true
           if git show-ref --verify --quiet refs/remotes/origin/bot-state; then
             git checkout -B bot-state origin/bot-state
@@ -44,7 +46,7 @@ jobs:
             git checkout --orphan bot-state
             git rm -rf . || true
           fi
-          git checkout main -- scan_state.json
+          cp "$RUNNER_TEMP/scan_state.json" scan_state.json
           git add scan_state.json
           git commit -m "Update NIFTY 500 scan state" || exit 0
           git push origin bot-state
