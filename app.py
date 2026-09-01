@@ -274,7 +274,7 @@ def trend_check(state):
         day_pct = market.get("day_pct", 0)
 
     mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
-    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 1, "breadth_valid": breadth_valid, "sector_breadth": sector_breadth, "mode": mode})
+    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 480, "breadth_valid": breadth_valid, "sector_breadth": sector_breadth, "mode": mode})
 
     if "trend_runtime" not in st.session_state:
         persisted = load_persisted_trades()
@@ -616,7 +616,9 @@ st.caption(
     f"Market Breadth • Advancing: {market.get('advances',0)} • "
     f"Declining: {market.get('declines',0)} • "
     f"Unchanged: {market.get('unchanged',0)} • "
-    f"Stocks Used for A/D: {market.get('valid_breadth_stocks',0)} / 500"
+    f"Stocks Used for A/D: {market.get('valid_breadth_stocks',0)} / 500 • "
+    f"Minimum Required: {market.get('breadth_minimum',480)} • "
+    f"{'VALID' if market.get('breadth_valid') else 'LOW COVERAGE — NO NEW TRADES'}"
 )
 
 # 2 STRATEGY REFERENCE - COLLAPSIBLE
