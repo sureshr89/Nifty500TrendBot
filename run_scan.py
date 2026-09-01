@@ -1,58 +1,30 @@
-"""GitHub pre-market scanner entry point.
+"""Run the pre-market NIFTY 500 scan and publish dashboard state."""
 
-GitHub prepares the Dhan-based NIFTY 500 BUY/SELL sets.
-Live 15-second LTP monitoring and S1/S2/S3 evaluation run in Streamlit.
-"""
-
-import json
 from pathlib import Path
+import json
 
 from bot_engine import scan_nifty500
 
-ROOT = Path(__file__).resolve().parent
-STATE_FILE = ROOT / "scan_state.json"
-RANKING_FILE = ROOT / "monthly_stock_ranking.csv"
 
-def write_state(state):
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+def records(frame):
+    return frame.where(frame.notna(), None).to_dict(orient="records")
 
-def premarket():
+
+def main():
     result = scan_nifty500()
-    result["classified"].to_csv(RANKING_FILE, index=False)
-
-    # Keep every mapped NIFTY 500 member for live A/D. Historical trend
-    # failures must never shrink the live breadth universe.
-    breadth_universe = result.get("breadth_universe", result["classified"]).copy()
-    if len(breadth_universe) != 500:
-        raise RuntimeError(
-            f"Live breadth universe must contain all 500 NIFTY members; got {len(breadth_universe)}"
-        )
     state = {
-        "health": {
-            "worker_status": "ok",
-            "last_scan_ist": result["generated_at"],
-            "last_error": ""
-        },
+        "generated_at": result["generated_at"],
         "market": result["market"],
-        "state_schema_version": 2,
-        "classified": result["classified"].to_dict(orient="records"),
-        "breadth_universe": breadth_universe.to_dict(orient="records"),
-        "buy_set": result["buy_set"].to_dict(orient="records"),
-        "sell_set": result["sell_set"].to_dict(orient="records"),
-        "scan_errors": result["errors"],
-        "strategies": {
-            "S1": {"enabled": True, "entry_start": "09:30", "entry_end": "13:00", "square_off": "14:55", "pullback_pct": 0.15},
-            "S2": {"enabled": True, "entry_start": "09:30", "entry_end": "13:00", "square_off": "14:55", "pullback_pct": 0.15},
-            "S3": {"enabled": True, "entry_start": "09:30", "entry_end": "13:00", "square_off": "14:55", "target_r": 1.25}
-        }
+        "breadth_universe": records(result["breadth_universe"]),
+        "classified": records(result["classified"]),
+        "buy_set": records(result["buy_set"]),
+        "sell_set": records(result["sell_set"]),
+        "errors": result["errors"],
     }
-    write_state(state)
-    return state
+    path = Path("scan_state.json")
+    path.write_text(json.dumps(state, ensure_ascii=False, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+    print(f"Scan complete: universe={len(state['breadth_universe'])}, classified={len(state['classified'])}, buy={len(state['buy_set'])}, sell={len(state['sell_set'])}, errors={len(state['errors'])}")
+
 
 if __name__ == "__main__":
-    state = premarket()
-    print(json.dumps({
-        "buy_count": len(state["buy_set"]),
-        "sell_count": len(state["sell_set"]),
-        "market": state["market"]
-    }, indent=2))
+    main()
