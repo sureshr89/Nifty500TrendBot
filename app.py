@@ -747,6 +747,50 @@ with st.expander("🏢 Sector A/D",expanded=False):
     else:
         st.caption("Sector A/D data will appear with live valid quotes.")
 
+# 7 FULL NIFTY 500 LIVE DATA - COLLAPSIBLE
+st.divider()
+with st.expander(f"📋 Full NIFTY 500 Live Data ({len(universe_rows)} mapped)",expanded=False):
+    all_stock_rows = []
+    for row in universe_rows:
+        try:
+            sid = int(row.get("SecurityId"))
+        except (TypeError, ValueError):
+            continue
+        q = live_quotes.get(sid, {})
+        live_ltp = q.get("ltp")
+        row_pdc = resolved_pdc.get(sid)
+        pdh = row.get("PDH", row.get("pdh"))
+        pdl = row.get("PDL", row.get("pdl"))
+        if live_ltp is not None and row_pdc not in (None, 0):
+            change_pct = (float(live_ltp) - float(row_pdc)) / float(row_pdc) * 100
+            ad_status = "ADVANCE" if live_ltp > row_pdc else ("DECLINE" if live_ltp < row_pdc else "UNCHANGED")
+        else:
+            change_pct = None
+            ad_status = "NO VALID LTP/PDC"
+        all_stock_rows.append({
+            "Symbol": row.get("Symbol", ""),
+            "Company": row.get("Company", ""),
+            "Sector": row.get("Sector", row.get("Industry", "")),
+            "SecurityId": sid,
+            "PDC": row_pdc,
+            "PDH": pdh,
+            "PDL": pdl,
+            "LTP": live_ltp,
+            "Change % vs PDC": change_pct,
+            "A/D Status": ad_status,
+            "Quote Status": "LIVE" if live_ltp is not None else "NO LTP"
+        })
+    all_stocks_df = pd.DataFrame(all_stock_rows)
+    if not all_stocks_df.empty:
+        st.caption(
+            f"Mapped: {len(all_stocks_df)} • Live LTP: {int(all_stocks_df['LTP'].notna().sum())} • "
+            f"Valid LTP + PDC: {valid_count} • Advancing: {advances} • "
+            f"Declining: {declines} • Unchanged: {unchanged}"
+        )
+        st.dataframe(all_stocks_df,use_container_width=True,hide_index=True)
+    else:
+        st.caption("No mapped NIFTY 500 stock data available.")
+
 # 7 LIGHTWEIGHT EOD / BACKTEST DOWNLOAD
 # Keep the website fast: analysis is exported to one Excel workbook and is not
 # rendered as multiple heavy tables in the Streamlit page.
