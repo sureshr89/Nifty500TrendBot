@@ -189,7 +189,19 @@ def trend_check(state):
         except (TypeError, ValueError):
             pass
 
-    live_quotes = client.quotes(sorted(set(universe_ids)), exchange_segment="NSE_EQ")
+    # ONE market scan per refresh: the full NIFTY 500 is fetched once and this
+    # single quote batch is reused for market A/D, every sector A/D, BUY/SELL
+    # candidate ranking, entries, exits, SL/Target checks and live P&L.
+    # Dhan quote limits are handled by deterministic batches without creating
+    # separate scans for separate purposes.
+    unique_universe_ids = sorted(set(universe_ids))
+    live_quotes = {}
+    quote_batch_size = 100
+    for start in range(0, len(unique_universe_ids), quote_batch_size):
+        quote_batch = unique_universe_ids[start:start + quote_batch_size]
+        live_quotes.update(
+            client.quotes(quote_batch, exchange_segment="NSE_EQ")
+        )
 
     # Populate BUY/SELL table LTP from the same quote batch.
     for stock in buy_rows + sell_rows:
