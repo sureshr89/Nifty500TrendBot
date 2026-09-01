@@ -179,23 +179,25 @@ def fetch_equity_ohlc(client, security_ids):
 
 
 def add_s1_levels(frame):
-    """Attach previous-day high, low and close for S1/S2/S3."""
+    """Attach PDH/PDL/PDC from Dhan historical data without shrinking the universe."""
     out = frame.copy()
-    pdh, pdl, pdc = [], [], []
     client = DhanClient()
+    ranges = {}
     for _, stock in out.iterrows():
-        hist = _history(client, stock["SecurityId"])
-        if len(hist) < 2:
-            pdh.append(None); pdl.append(None); pdc.append(None)
-        else:
-            prev = hist.iloc[-2]
-            pdh.append(float(prev["high"]))
-            pdl.append(float(prev["low"]))
-            pdc.append(float(prev["close"]))
-    out["PDH"] = pdh
-    out["PDL"] = pdl
-    out["PDC"] = pdc
-    return out.dropna(subset=["PDH", "PDL", "PDC"]).copy()
+        try:
+            hist = _history(client, stock["SecurityId"])
+            if len(hist) >= 2:
+                prev = hist.iloc[-2]
+                ranges[int(stock["SecurityId"])] = {
+                    "PDH": float(prev["high"]),
+                    "PDL": float(prev["low"]),
+                    "PDC": float(prev["close"]),
+                }
+        except Exception:
+            continue
+    for col in ("PDH", "PDL", "PDC"):
+        out[col] = out["SecurityId"].map(lambda sid: ranges.get(int(sid), {}).get(col))
+    return out
 
 
 def scan_nifty500():
@@ -219,12 +221,15 @@ def scan_nifty500():
 
     frame = pd.DataFrame(rows)
     frame = add_s1_levels(frame)
+    # A stock can be in breadth but must have complete Dhan historical levels
+    # before it is eligible for any strategy set.
+    strategy_frame = frame.dropna(subset=["PDH", "PDL", "PDC"]).copy()
     periods = ["1Y Return %", "6M Return %", "1M Return %", "1W Return %"]
-    frame["Trend"] = "MIXED"
-    frame.loc[(frame[periods] > 0).all(axis=1), "Trend"] = "BULLISH"
-    frame.loc[(frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
+    strategy_frame["Trend"] = "MIXED"
+    strategy_frame.loc[(strategy_frame[periods] > 0).all(axis=1), "Trend"] = "BULLISH"
+    strategy_frame.loc[(strategy_frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
 
-    advances, declines, ad_ratio = calculate_advance_decline(frame)
+    advances, declines, ad_ratio = calculate_advance_decline(strategy_frame)
     ltp, pdc, nifty_security_id = fetch_nifty500_index(client)
     day_pct = ((ltp - pdc) / pdc * 100.0) if pdc else 0.0
     if day_pct > 0 and ad_ratio > 1:
@@ -248,8 +253,8 @@ def scan_nifty500():
         # Keep the complete 500-member universe separate from the scan-success
         # frame. Historical scan failures must never shrink live A/D coverage.
         "breadth_universe": universe.copy(),
-        "classified": frame,
-        "buy_set": frame[frame["Trend"].eq("BULLISH")].copy(),
-        "sell_set": frame[frame["Trend"].eq("BEARISH")].copy(),
+        "classified": strategy_frame,
+        "buy_set": strategy_frame[strategy_frame["Trend"].eq("BULLISH")].copy(),
+        "sell_set": strategy_frame[strategy_frame["Trend"].eq("BEARISH")].copy(),
         "errors": errors,
     }
