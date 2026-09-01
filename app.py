@@ -318,15 +318,22 @@ def trend_check(state):
             if risk_per_share <= 0:
                 return False
 
-            # Use the largest whole-share quantity that stays within the
-            # maximum risk, thereby getting as close as possible to ₹1,500.
-            quantity = int(MAX_RISK_PER_TRADE // risk_per_share)
+            # Position size must satisfy BOTH the SL-risk band and the
+            # maximum capital deployed per trade.
+            MAX_CAPITAL_PER_TRADE = 150000.0
+            risk_qty = int(MAX_RISK_PER_TRADE // risk_per_share)
+            capital_qty = int(MAX_CAPITAL_PER_TRADE // entry)
+            quantity = min(risk_qty, capital_qty)
             if quantity < 1:
                 return False
             actual_risk = quantity * risk_per_share
+            actual_capital = quantity * entry
 
-            # Trades below ₹1,000 intended risk are not accepted.
-            if actual_risk < MIN_RISK_PER_TRADE or actual_risk > MAX_RISK_PER_TRADE:
+            # Reject trades that cannot satisfy all sizing rules. Never force
+            # a trade with risk below ₹1,000 just because the capital cap binds.
+            if (actual_risk < MIN_RISK_PER_TRADE or
+                    actual_risk > MAX_RISK_PER_TRADE or
+                    actual_capital > MAX_CAPITAL_PER_TRADE):
                 return False
             trades.append({
                 "strategy": strategy, "side": side, "status": "OPEN",
