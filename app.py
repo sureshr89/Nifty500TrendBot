@@ -442,8 +442,11 @@ def trend_check(state):
 # --------------------------- Dashboard ---------------------------
 st.markdown("""
 <style>
-.block-container {max-width:1200px;padding-top:1rem;padding-bottom:2rem;}
-div[data-testid="stExpander"] {border-radius:10px;}
+.block-container {max-width:1200px;padding-top:0.8rem;padding-bottom:2rem;}
+div[data-testid="stExpander"] {border-radius:12px;}
+.metric-card{background:rgba(128,128,128,.10);border:1px solid rgba(128,128,128,.20);border-radius:12px;padding:10px 12px;margin:4px 0;min-height:76px;}
+.metric-label{font-size:.78rem;opacity:.72;margin-bottom:5px;}
+.metric-value{font-size:1.08rem;font-weight:700;word-break:break-word;}
 </style>
 """,unsafe_allow_html=True)
 
@@ -470,7 +473,8 @@ def pnl(t):
         try:
             quote=market.get("live_quotes",{}).get(int(t.get("SecurityId")))
             px=quote.get("ltp") if quote else e
-        except Exception: px=e
+        except Exception:
+            px=e
     px=float(px or e)
     return (px-e)*q if t.get("side")=="BUY" else (e-px)*q
 
@@ -480,17 +484,25 @@ def capital(t):
 def trade_df(items):
     data=[]
     for t in items:
+        entry=float(t.get("entry_price",0) or 0)
+        sl=float(t.get("SL",0) or 0)
+        risk_per_share=abs(entry-sl)
+        risk_amount=risk_per_share*float(t.get("quantity",0) or 0)
+        realized=pnl(t)
         data.append({
             "Date":str(t.get("entry_time",""))[:10],
             "Strategy":t.get("strategy","—"),"Side":t.get("side","—"),
             "Symbol":t.get("Symbol","—"),
             "Stock Name":t.get("Company") or t.get("Stock Name") or t.get("Symbol","—"),
             "Entry Time":t.get("entry_time","—"),"Entry":t.get("entry_price"),
-            "Qty":t.get("quantity"),"Capital Used":capital(t),"SL":t.get("SL"),
-            "Target":t.get("target"),"Status":t.get("status","—"),
+            "Qty":t.get("quantity"),"Capital Used":capital(t),
+            "SL":t.get("SL"),"Target":t.get("target"),
+            "Risk / Share":risk_per_share,"Risk Amount":risk_amount,
+            "Status":t.get("status","—"),
             "Exit Time":t.get("exit_time","—"),"Exit Price":t.get("exit_price"),
             "Exit Reason":t.get("exit_reason","OPEN" if t.get("status")=="OPEN" else "—"),
-            "P&L":pnl(t)
+            "P&L":realized,
+            "Return %":(realized/capital(t)*100) if capital(t)>0 else 0.0
         })
     return pd.DataFrame(data)
 
@@ -507,10 +519,19 @@ def stats(items):
         "maxcap":max(caps) if caps else 0,"mincap":min(caps) if caps else 0,
         "avgwin":sum(x for x in cp if x>0)/wins if wins else 0,
         "avgloss":sum(x for x in cp if x<0)/losses if losses else 0,
-        "maxprofit":max(cp) if cp else 0,"maxloss":min(cp) if cp else 0
+        "maxprofit":max(cp) if cp else 0,"maxloss":min(cp) if cp else 0,
+        "grossprofit":sum(x for x in cp if x>0),"grossloss":sum(x for x in cp if x<0),
+        "profitfactor":(sum(x for x in cp if x>0)/abs(sum(x for x in cp if x<0))) if sum(x for x in cp if x<0)!=0 else 0,
+        "expectancy":sum(cp)/len(cp) if cp else 0
     }
 
-# 1. LIVE MARKET
+def cards(pairs, cols=3):
+    for i in range(0,len(pairs),cols):
+        row=st.columns(cols)
+        for j,(label,value) in enumerate(pairs[i:i+cols]):
+            row[j].markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>',unsafe_allow_html=True)
+
+# 1 LIVE MARKET
 st.subheader("📊 Live Market")
 st.dataframe(pd.DataFrame([{
     "Worker":live_status,
@@ -520,74 +541,176 @@ st.dataframe(pd.DataFrame([{
     "Bias":mode
 }]),use_container_width=True,hide_index=True)
 
-# 2. STRATEGY TABLE
-st.divider(); st.subheader("🎯 S1 / S2 / S3 / S4")
-rules=[
-["S1","BUY","09:30–13:00","Open > PDH → pullback 0.15% → reclaim PDH","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
-["S1","SELL","09:30–13:00","Open < PDL → pullback 0.15% → break PDL","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
-["S2","BUY","09:30–13:00","Open inside range → below PDL 0.15% → reclaim PDL","PDL−(PDH−PDL)/2","1.25R","SL / Target / 14:55"],
-["S2","SELL","09:30–13:00","Open inside range → above PDH 0.15% → break PDH","PDH+(PDH−PDL)/2","1.25R","SL / Target / 14:55"],
-["S3","BUY","09:30–13:00","Open < PDL → reclaim PDL","Today's Low","1.25R","SL / Target / 14:55"],
-["S3","SELL","09:30–13:00","Open > PDH → break below PDH","Today's High","1.25R","SL / Target / 14:55"],
-["S4","BUY","09:30–13:00","Open inside range → cross PDH","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
-["S4","SELL","09:30–13:00","Open inside range → cross PDL","(PDH+PDL)/2","1.25R","SL / Target / 14:55"]]
-st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Time","Entry Reason","SL","Target","Exit"]),use_container_width=True,hide_index=True)
+# 2 STRATEGY REFERENCE - COLLAPSIBLE
+st.divider()
+with st.expander("🎯 S1 / S2 / S3 / S4 — Strategy Rules",expanded=False):
+    rules=[
+    ["S1","BUY","09:30–13:00","Open > PDH → low ≤ PDH×0.9985 → reclaim PDH","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
+    ["S1","SELL","09:30–13:00","Open < PDL → high ≥ PDL×1.0015 → break PDL","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
+    ["S2","BUY","09:30–13:00","Open inside range → low ≤ PDL×0.9985 → reclaim PDL","PDL−(PDH−PDL)/2","1.25R","SL / Target / 14:55"],
+    ["S2","SELL","09:30–13:00","Open inside range → high ≥ PDH×1.0015 → break PDH","PDH+(PDH−PDL)/2","1.25R","SL / Target / 14:55"],
+    ["S3","BUY","09:30–13:00","Open < PDL → previous LTP < PDL → reclaim PDL","Today's Low","1.25R","SL / Target / 14:55"],
+    ["S3","SELL","09:30–13:00","Open > PDH → previous LTP > PDH → break below PDH","Today's High","1.25R","SL / Target / 14:55"],
+    ["S4","BUY","09:30–13:00","Open inside range → previous LTP < PDH → cross PDH","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
+    ["S4","SELL","09:30–13:00","Open inside range → previous LTP > PDL → cross PDL","(PDH+PDL)/2","1.25R","SL / Target / 14:55"]]
+    st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Window","Exact Entry Condition","SL","Target","Exit"]),use_container_width=True,hide_index=True)
 
-# 3. TODAY
+# DATA
 today=now_ist().strftime("%Y-%m-%d")
 today_items=[t for t in trades if str(t.get("entry_time","")).startswith(today)]
-st.divider(); st.subheader("📅 Today's Performance")
 tdf=trade_df(today_items)
-if tdf.empty: st.caption("No trades taken today.")
-else: st.dataframe(tdf,use_container_width=True,hide_index=True)
-s=stats(today_items)
-st.caption(f"Trades Taken: {s['taken']} • Open: {s['open']} • Closed: {s['closed']} • Wins: {s['wins']} • Losses: {s['losses']} • Win %: {s['winpct']:.2f}% • Realized P&L: ₹{s['realized']:,.2f} • Live P&L: ₹{s['live']:,.2f} • Total P&L: ₹{s['realized']+s['live']:,.2f} • Max Capital Used: ₹{s['maxcap']:,.2f} • Min Capital Used: ₹{s['mincap']:,.2f}")
-
-# 4. ALL TRADES
-st.divider(); st.subheader("📂 All Trades")
 adf=trade_df(trades)
-with st.expander(f"Show complete trade history ({len(trades)})",expanded=False):
-    if adf.empty: st.caption("No paper trades yet.")
-    else: st.dataframe(adf,use_container_width=True,hide_index=True)
+s=stats(today_items)
 cs=stats(trades)
-st.markdown("**Cumulative Performance**")
-st.caption(f"Total Trades: {cs['taken']} • Closed: {cs['closed']} • Open: {cs['open']} • Wins: {cs['wins']} • Losses: {cs['losses']} • Overall Win %: {cs['winpct']:.2f}% • Total Realized P&L: ₹{cs['realized']:,.2f} • Live P&L: ₹{cs['live']:,.2f} • Total P&L: ₹{cs['realized']+cs['live']:,.2f} • Average Win: ₹{cs['avgwin']:,.2f} • Average Loss: ₹{cs['avgloss']:,.2f} • Max Profit: ₹{cs['maxprofit']:,.2f} • Max Loss: ₹{cs['maxloss']:,.2f} • Max Capital Used: ₹{cs['maxcap']:,.2f} • Min Capital Used: ₹{cs['mincap']:,.2f}")
 
+# 3 TODAY PERFORMANCE - COLLAPSIBLE + CARDS
+st.divider()
+with st.expander("📅 Today's Performance",expanded=True):
+    if tdf.empty:
+        st.caption("No trades taken today.")
+    else:
+        st.dataframe(tdf,use_container_width=True,hide_index=True)
+    cards([
+        ("Trades Taken",s["taken"]),("Open",s["open"]),("Closed",s["closed"]),
+        ("Wins",s["wins"]),("Losses",s["losses"]),("Win %",f"{s['winpct']:.2f}%"),
+        ("Realized P&L",f"₹{s['realized']:,.2f}"),("Live P&L",f"₹{s['live']:,.2f}"),("Total P&L",f"₹{s['realized']+s['live']:,.2f}"),
+        ("Max Capital Used",f"₹{s['maxcap']:,.2f}"),("Min Capital Used",f"₹{s['mincap']:,.2f}")
+    ],3)
+
+# 4 ALL TRADES + CUMULATIVE CARDS
+st.divider()
+st.subheader("📂 All Trades & Cumulative Performance")
+with st.expander(f"Show Complete Trade History ({len(trades)} trades)",expanded=False):
+    if adf.empty:
+        st.caption("No paper trades yet.")
+    else:
+        st.dataframe(adf,use_container_width=True,hide_index=True)
+
+st.markdown("**Cumulative Performance**")
+cards([
+    ("Total Trades",cs["taken"]),("Closed",cs["closed"]),("Open",cs["open"]),
+    ("Wins",cs["wins"]),("Losses",cs["losses"]),("Overall Win %",f"{cs['winpct']:.2f}%"),
+    ("Realized P&L",f"₹{cs['realized']:,.2f}"),("Live P&L",f"₹{cs['live']:,.2f}"),("Total P&L",f"₹{cs['realized']+cs['live']:,.2f}"),
+    ("Average Win",f"₹{cs['avgwin']:,.2f}"),("Average Loss",f"₹{cs['avgloss']:,.2f}"),("Profit Factor",f"{cs['profitfactor']:.2f}"),
+    ("Expectancy / Closed Trade",f"₹{cs['expectancy']:,.2f}"),("Max Profit",f"₹{cs['maxprofit']:,.2f}"),("Max Loss",f"₹{cs['maxloss']:,.2f}"),
+    ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}"),
+    ("Max Capital Used",f"₹{cs['maxcap']:,.2f}"),("Min Capital Used",f"₹{cs['mincap']:,.2f}")
+],3)
+
+# 5 BUY / SELL
 def show_set(title,rows,icon):
     with st.expander(f"{icon} {title} ({len(rows)})",expanded=False):
-        if not rows: st.caption("No stocks in this set."); return
+        if not rows:
+            st.caption("No stocks in this set."); return
         df=pd.DataFrame(rows)
         preferred=["Symbol","Company","Sector","Trend","LTP","1Y Return %","6M Return %","1M Return %","1W Return %","1D Return %","PDH","PDL"]
         cols=[x for x in preferred if x in df.columns]
         st.dataframe(df[cols] if cols else df,use_container_width=True,hide_index=True)
 
-# 5. BUY / SELL
 st.divider(); st.subheader("Stock Sets")
 show_set("BUY SET",buy_rows,"🟢")
 show_set("SELL SET",sell_rows,"🔴")
 
-# 6. SECTOR A/D
-st.divider(); st.subheader("🏢 Sector A/D")
-sb=market.get("sector_breadth",{})
-if sb:
-    sdf=pd.DataFrame([{"Sector":name,**vals} for name,vals in sb.items()])
-    if "ad_ratio" in sdf.columns: sdf=sdf.sort_values("ad_ratio",ascending=False)
-    st.dataframe(sdf,use_container_width=True,hide_index=True)
-else: st.caption("Sector A/D data will appear with live valid quotes.")
+# 6 SECTOR A/D - COLLAPSIBLE
+st.divider()
+with st.expander("🏢 Sector A/D",expanded=False):
+    sb=market.get("sector_breadth",{})
+    if sb:
+        sdf=pd.DataFrame([{"Sector":name,**vals} for name,vals in sb.items()])
+        if "ad_ratio" in sdf.columns: sdf=sdf.sort_values("ad_ratio",ascending=False)
+        st.dataframe(sdf,use_container_width=True,hide_index=True)
+    else:
+        st.caption("Sector A/D data will appear with live valid quotes.")
 
-# 7. MONTH-WISE
-st.divider(); st.subheader("📥 Month-wise Cumulative Performance")
-if not adf.empty:
-    x=adf.copy(); x["Month"]=pd.to_datetime(x["Date"],errors="coerce").dt.strftime("%Y-%m")
-    rows=[]
-    for month,g in x.dropna(subset=["Month"]).groupby("Month"):
-        closed=g[g["Status"]=="CLOSED"]; wins=int((closed["P&L"]>0).sum()); losses=int((closed["P&L"]<0).sum())
-        rows.append({"Month":month,"Trades":len(g),"Wins":wins,"Losses":losses,"Win %":wins/len(closed)*100 if len(closed) else 0,
-            "Realized P&L":float(closed["P&L"].sum()),"Live P&L":float(g[g["Status"]=="OPEN"]["P&L"].sum()),
-            "Total P&L":float(g["P&L"].sum()),"Max Capital Used":float(g["Capital Used"].max()),"Min Capital Used":float(g["Capital Used"].min())})
-    mdf=pd.DataFrame(rows)
-    st.dataframe(mdf,use_container_width=True,hide_index=True)
-    st.download_button("📥 Download Month-wise Performance CSV",mdf.to_csv(index=False).encode("utf-8"),"nifty500_trend_bot_monthly_performance.csv","text/csv")
-else: st.caption("Month-wise data will build from persistent trade history.")
+# 7 FULL BACKTEST / 360 ANALYSIS - COLLAPSIBLE + DOWNLOADS
+st.divider()
+with st.expander("📥 Full Backtest / 360° Strategy Analysis",expanded=False):
+    if adf.empty:
+        st.caption("This section builds automatically as persistent trade history grows.")
+    else:
+        x=adf.copy()
+        x["Entry DateTime"]=pd.to_datetime(x["Entry Time"],errors="coerce")
+        x["Exit DateTime"]=pd.to_datetime(x["Exit Time"],errors="coerce")
+        x["Month"]=x["Entry DateTime"].dt.strftime("%Y-%m")
+        x["Weekday"]=x["Entry DateTime"].dt.day_name()
+        x["Entry Hour"]=x["Entry DateTime"].dt.strftime("%H")
+        x["Closed Trade"]=x["Status"].eq("CLOSED")
+        x["Win"]=x["P&L"]>0
+        x["Loss"]=x["P&L"]<0
 
-st.caption("Persistent trade history is retained separately. Dashboard layout changes do not change entry, exit, SL, target, timing, sector filtering or risk logic.")
+        st.markdown("**Month-wise Performance**")
+        monthly=[]
+        for month,g in x.dropna(subset=["Month"]).groupby("Month"):
+            closed=g[g["Closed Trade"]]
+            wins=int((closed["P&L"]>0).sum()); losses=int((closed["P&L"]<0).sum())
+            gross_profit=float(closed.loc[closed["P&L"]>0,"P&L"].sum())
+            gross_loss=float(closed.loc[closed["P&L"]<0,"P&L"].sum())
+            monthly.append({
+                "Month":month,"Trades":len(g),"Closed":len(closed),"Open":int((~g["Closed Trade"]).sum()),
+                "Wins":wins,"Losses":losses,"Win %":wins/len(closed)*100 if len(closed) else 0,
+                "Gross Profit":gross_profit,"Gross Loss":gross_loss,
+                "Profit Factor":gross_profit/abs(gross_loss) if gross_loss else 0,
+                "Realized P&L":float(closed["P&L"].sum()),"Live P&L":float(g.loc[~g["Closed Trade"],"P&L"].sum()),
+                "Total P&L":float(g["P&L"].sum()),"Average P&L":float(g["P&L"].mean()),
+                "Best Trade":float(g["P&L"].max()),"Worst Trade":float(g["P&L"].min()),
+                "Max Capital":float(g["Capital Used"].max()),"Min Capital":float(g["Capital Used"].min()),
+                "Avg Capital":float(g["Capital Used"].mean()),"Total Capital Turnover":float(g["Capital Used"].sum()),
+                "Avg Return %":float(g["Return %"].mean()),"Total Risk Amount":float(g["Risk Amount"].sum())
+            })
+        monthly_df=pd.DataFrame(monthly)
+        st.dataframe(monthly_df,use_container_width=True,hide_index=True)
+
+        st.markdown("**Strategy-wise Analysis**")
+        strategy=[]
+        for name,g in x.groupby("Strategy"):
+            closed=g[g["Closed Trade"]]
+            wins=int((closed["P&L"]>0).sum()); losses=int((closed["P&L"]<0).sum())
+            gp=float(closed.loc[closed["P&L"]>0,"P&L"].sum()); gl=float(closed.loc[closed["P&L"]<0,"P&L"].sum())
+            strategy.append({
+                "Strategy":name,"Trades":len(g),"Closed":len(closed),"Open":int((~g["Closed Trade"]).sum()),
+                "Wins":wins,"Losses":losses,"Win %":wins/len(closed)*100 if len(closed) else 0,
+                "Realized P&L":float(closed["P&L"].sum()),"Live P&L":float(g.loc[~g["Closed Trade"],"P&L"].sum()),
+                "Total P&L":float(g["P&L"].sum()),"Avg P&L":float(g["P&L"].mean()),
+                "Best":float(g["P&L"].max()),"Worst":float(g["P&L"].min()),
+                "Profit Factor":gp/abs(gl) if gl else 0,"Avg Return %":float(g["Return %"].mean()),
+                "Avg Capital":float(g["Capital Used"].mean()),"Total Capital":float(g["Capital Used"].sum()),
+                "Avg Risk":float(g["Risk Amount"].mean())
+            })
+        strategy_df=pd.DataFrame(strategy).sort_values("Total P&L",ascending=False)
+        st.dataframe(strategy_df,use_container_width=True,hide_index=True)
+
+        st.markdown("**Stock-wise Analysis**")
+        stock_df=(x.groupby(["Symbol","Stock Name","Side"],dropna=False)
+            .agg(Trades=("Symbol","size"),Closed=("Closed Trade","sum"),Wins=("Win","sum"),Losses=("Loss","sum"),
+                 Total_PnL=("P&L","sum"),Avg_PnL=("P&L","mean"),Best_Trade=("P&L","max"),Worst_Trade=("P&L","min"),
+                 Avg_Return_pct=("Return %","mean"),Avg_Capital=("Capital Used","mean"),Total_Capital=("Capital Used","sum"),
+                 Avg_Risk=("Risk Amount","mean"))
+            .reset_index())
+        stock_df["Win %"]=stock_df.apply(lambda r:(r["Wins"]/r["Closed"]*100) if r["Closed"] else 0,axis=1)
+        st.dataframe(stock_df.sort_values("Total_PnL",ascending=False),use_container_width=True,hide_index=True)
+
+        st.markdown("**Exit Reason Analysis**")
+        exit_df=(x.groupby(["Exit Reason","Status"],dropna=False)
+            .agg(Trades=("Status","size"),Total_PnL=("P&L","sum"),Average_PnL=("P&L","mean"),
+                 Best=("P&L","max"),Worst=("P&L","min"))
+            .reset_index())
+        st.dataframe(exit_df,use_container_width=True,hide_index=True)
+
+        st.markdown("**Side-wise Analysis**")
+        side_df=(x.groupby("Side")
+            .agg(Trades=("Side","size"),Total_PnL=("P&L","sum"),Average_PnL=("P&L","mean"),
+                 Best=("P&L","max"),Worst=("P&L","min"),Avg_Capital=("Capital Used","mean"),
+                 Avg_Return_pct=("Return %","mean"))
+            .reset_index())
+        st.dataframe(side_df,use_container_width=True,hide_index=True)
+
+        st.markdown("**Full Trade-Level Backtest Data**")
+        st.dataframe(x.drop(columns=["Entry DateTime","Exit DateTime","Closed Trade","Win","Loss"],errors="ignore"),use_container_width=True,hide_index=True)
+
+        full_csv=x.drop(columns=["Entry DateTime","Exit DateTime"],errors="ignore").to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Full 360° Backtest CSV",full_csv,"nifty500_full_backtest_360.csv","text/csv")
+        st.download_button("📥 Download Month-wise Analysis CSV",monthly_df.to_csv(index=False).encode("utf-8"),"nifty500_monthly_analysis.csv","text/csv")
+        st.download_button("📥 Download Strategy Analysis CSV",strategy_df.to_csv(index=False).encode("utf-8"),"nifty500_strategy_analysis.csv","text/csv")
+        st.download_button("📥 Download Stock-wise Analysis CSV",stock_df.to_csv(index=False).encode("utf-8"),"nifty500_stock_analysis.csv","text/csv")
+
+st.caption("Live and closed trades are not deleted by this dashboard. This update only adds mobile-friendly display, analysis and downloads; entry, exit, SL, target, timing, sector filtering and risk logic remain unchanged.")
