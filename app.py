@@ -365,7 +365,26 @@ def trend_check(state):
         day_pct = market.get("day_pct", 0)
 
     mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
-    market.update({"ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio, "advances": advances, "declines": declines, "unchanged": unchanged, "valid_breadth_stocks": valid_count, "breadth_minimum": 480, "breadth_valid": breadth_valid, "sector_breadth": sector_breadth, "mode": mode})
+    dhan_ltp_valid = sum(
+        1 for _sid in universe_ids
+        if (_sid in live_quotes and live_quotes[_sid].get("ltp") is not None and float(live_quotes[_sid].get("ltp") or 0) > 0)
+    )
+    dhan_ltp_missing = max(0, len(universe_ids) - dhan_ltp_valid)
+    dhan_pdc_valid = sum(1 for _sid in universe_ids if _sid in resolved_pdc and resolved_pdc[_sid] is not None)
+    dhan_ad_valid = valid_count
+    market.update({
+        "ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio,
+        "advances": advances, "declines": declines, "unchanged": unchanged,
+        "valid_breadth_stocks": valid_count, "breadth_minimum": 480,
+        "breadth_valid": breadth_valid, "sector_breadth": sector_breadth,
+        "mode": mode,
+        "dhan_universe_total": len(universe_ids),
+        "dhan_ltp_valid": dhan_ltp_valid,
+        "dhan_ltp_missing": dhan_ltp_missing,
+        "dhan_pdc_valid": dhan_pdc_valid,
+        "dhan_ad_valid": dhan_ad_valid,
+        "dhan_quote_coverage_pct": (dhan_ltp_valid / len(universe_ids) * 100) if universe_ids else 0,
+    })
 
     if "trend_runtime" not in st.session_state:
         persisted = load_persisted_trades()
@@ -734,10 +753,25 @@ st.caption(
     f"Market Breadth • Advancing: {market.get('advances',0)} • "
     f"Declining: {market.get('declines',0)} • "
     f"Unchanged: {market.get('unchanged',0)} • "
-    f"Stocks Used for A/D: {market.get('valid_breadth_stocks',0)} / 500 • "
+    f"Stocks Used for A/D: {market.get('valid_breadth_stocks',0)} / {market.get('dhan_universe_total',500)} • "
     f"Minimum Required: {market.get('breadth_minimum',480)} • "
     f"{'VALID' if market.get('breadth_valid') else 'LOW COVERAGE — NO NEW TRADES'}"
 )
+
+# Dhan coverage is display-only and uses the exact same 15-second quote batch.
+with st.expander("📡 Dhan Live Coverage — 15 Second Snapshot", expanded=False):
+    cards([
+        ("NIFTY 500 Universe", f"{market.get('dhan_universe_total',0)}"),
+        ("Dhan LTP Pulled", f"{market.get('dhan_ltp_valid',0)}"),
+        ("LTP Not Pulled", f"{market.get('dhan_ltp_missing',0)}"),
+        ("LTP Coverage", f"{float(market.get('dhan_quote_coverage_pct',0) or 0):.2f}%"),
+        ("Dhan PDC Available", f"{market.get('dhan_pdc_valid',0)}"),
+        ("Used for A/D", f"{market.get('dhan_ad_valid',0)}"),
+    ])
+    st.caption(
+        "This section is calculated from the same Dhan live quote batch used for "
+        "A/D, Sector A/D, trade monitoring and live P&L. No extra market scan is performed."
+    )
 
 # 2 STRATEGY REFERENCE - COLLAPSIBLE
 st.divider()
