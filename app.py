@@ -545,7 +545,27 @@ def trend_check(state):
                 break
 
     # Expose the already-fetched quote batch for display-only live P&L.
+    # Preserve the complete single-scan snapshot for downstream dashboard views.
     market["live_quotes"] = live_quotes
+    market["resolved_pdc"] = resolved_pdc
+    market["breadth_universe_rows"] = universe_rows
+    # PDH/PDL come from the existing premarket scan sets. Attach them by
+    # SecurityId to the independent 500-stock breadth rows without another scan.
+    range_by_id = {}
+    for _row in state.get("classified", []) or []:
+        try:
+            _sid = int(_row.get("SecurityId"))
+            range_by_id[_sid] = (_row.get("PDH", _row.get("pdh")), _row.get("PDL", _row.get("pdl")))
+        except (TypeError, ValueError):
+            pass
+    for _row in universe_rows:
+        try:
+            _sid = int(_row.get("SecurityId"))
+        except (TypeError, ValueError):
+            continue
+        _rng = range_by_id.get(_sid)
+        if _rng:
+            _row["PDH"], _row["PDL"] = _rng
     persist_trades(runtime)
     return market, runtime["trades"]
 
