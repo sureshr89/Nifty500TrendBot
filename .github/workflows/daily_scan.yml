@@ -39,15 +39,21 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           test -f scan_state.json
           cp scan_state.json "$RUNNER_TEMP/scan_state.json"
+          # The generated state is untracked on main. Remove it from the
+          # working tree before switching branches; git clean is deliberate here
+          # because the generated copy is already safely stored in RUNNER_TEMP.
+          rm -rf scan_state.json
+          git clean -fd -- scan_state.json
+          test ! -e scan_state.json
+
           git fetch origin bot-state || true
           if git show-ref --verify --quiet refs/remotes/origin/bot-state; then
-            rm -f scan_state.json
             git checkout -B bot-state origin/bot-state
           else
-            rm -f scan_state.json
             git checkout --orphan bot-state
             git rm -rf . || true
           fi
+
           cp "$RUNNER_TEMP/scan_state.json" scan_state.json
           git add scan_state.json
           git commit -m "Update NIFTY 500 scan state" || exit 0
