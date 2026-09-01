@@ -41,8 +41,10 @@ jobs:
           cp scan_state.json "$RUNNER_TEMP/scan_state.json"
           git fetch origin bot-state || true
           if git show-ref --verify --quiet refs/remotes/origin/bot-state; then
+            rm -f scan_state.json
             git checkout -B bot-state origin/bot-state
           else
+            rm -f scan_state.json
             git checkout --orphan bot-state
             git rm -rf . || true
           fi
