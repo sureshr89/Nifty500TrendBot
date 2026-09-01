@@ -24,7 +24,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "full500-independent-live-breadth-v1"
+APP_BUILD = "full500-pdh-pdl-complete-v2"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -45,9 +45,15 @@ def load_previous_day_ranges():
             if r.status_code != 200:
                 continue
             with zipfile.ZipFile(BytesIO(r.content)) as z:
-                raw = pd.read_csv(z.open(z.namelist()[0]))
+                csv_files = [n for n in z.namelist() if n.lower().endswith(".csv")]
+                if not csv_files:
+                    continue
+                raw = pd.read_csv(z.open(csv_files[0]))
             cols = {x.upper().strip(): x for x in raw.columns}
-            sym_col, high_col, low_col, series_col = cols.get("SYMBOL"), cols.get("HIGH"), cols.get("LOW"), cols.get("SERIES")
+            sym_col = cols.get("SYMBOL")
+            high_col = cols.get("HIGH") or cols.get("HIGH_PRICE")
+            low_col = cols.get("LOW") or cols.get("LOW_PRICE")
+            series_col = cols.get("SERIES")
             if not sym_col or not high_col or not low_col:
                 continue
             df = raw.copy()
@@ -60,6 +66,7 @@ def load_previous_day_ranges():
             return df.set_index("Symbol")[["PDH","PDL"]].to_dict("index")
         except Exception:
             continue
+    # Fallback: previous-day range already stored for strategy/classified rows.
     return {}
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -885,6 +892,17 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
             row_pdc = None
         pdh = row.get("PDH", row.get("pdh"))
         pdl = row.get("PDL", row.get("pdl"))
+        # Final fallback for the stock sets/classified state. This fills any
+        # symbol whose NSE range source was temporarily unavailable.
+        if pdh in (None, "") or pdl in (None, ""):
+            _fallback = None
+            for _src in (buy_rows + sell_rows + state.get("classified", [])):
+                if str(_src.get("Symbol", "")).upper().strip() == str(row.get("Symbol", "")).upper().strip():
+                    _fallback = _src
+                    break
+            if _fallback:
+                pdh = pdh if pdh not in (None, "") else _fallback.get("PDH", _fallback.get("pdh"))
+                pdl = pdl if pdl not in (None, "") else _fallback.get("PDL", _fallback.get("pdl"))
         if live_ltp is not None and row_pdc not in (None, 0):
             change_pct = (float(live_ltp) - float(row_pdc)) / float(row_pdc) * 100
             ad_status = "ADVANCE" if live_ltp > row_pdc else ("DECLINE" if live_ltp < row_pdc else "UNCHANGED")
