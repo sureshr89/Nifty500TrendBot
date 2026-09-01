@@ -22,7 +22,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "dhan-live-only-v4"
+APP_BUILD = "mandatory-5index-basis-v5"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -132,6 +132,27 @@ class DhanLiveClient:
                 "previous_close": float(previous_close) if previous_close not in (None, "") else None,
             }
         return result
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_dhan_broad_index_ids():
+    """Resolve required broad-market indices from Dhan's index security master."""
+    master = pd.read_csv("https://images.dhan.co/api-data/api-scrip-master-detailed.csv", low_memory=False)
+    idx = master[master["EXCH_ID"].astype(str).str.upper().eq("NSE") & master["SEGMENT"].astype(str).str.upper().str.contains("IDX", na=False)].copy()
+    name_col = "DISPLAY_NAME" if "DISPLAY_NAME" in idx.columns else "UNDERLYING_SYMBOL"
+    names = idx[name_col].astype(str).str.upper().str.replace(r"\s+", " ", regex=True).str.strip()
+    aliases = {"Nifty 50":["NIFTY 50"],"Nifty Next 50":["NIFTY NEXT 50"],"Nifty Midcap 150":["NIFTY MIDCAP 150","NIFTY MIDCAP150"],"Nifty Smallcap 250":["NIFTY SMALLCAP 250","NIFTY SMALLCAP250"],"Nifty 500":["NIFTY 500"]}
+    out = {}
+    for label, choices in aliases.items():
+        hit = None
+        for choice in choices:
+            rows = idx[names.eq(choice)]
+            if len(rows):
+                hit = rows.iloc[0]
+                break
+        if hit is None:
+            raise RuntimeError(f"Dhan index Security ID not found for {label}")
+        out[label] = int(hit["SECURITY_ID"])
+    return out
 
 def now_ist():
     return datetime.now(IST)
@@ -359,22 +380,32 @@ def trend_check(state):
         ad_ratio = float("inf")
     else:
         ad_ratio = None
-    ltp = market.get("ltp")
-    pdc = market.get("pdc")
+    # Mandatory broad-market basis. All five indices are fetched from Dhan.
+    index_ids = load_dhan_broad_index_ids()
+    index_quotes = client.quotes(list(index_ids.values()), exchange_segment="IDX_I")
+    index_basis = {}
+    for name, sid in index_ids.items():
+        q = index_quotes.get(int(sid), {})
+        idx_ltp, idx_pdc = q.get("ltp"), q.get("previous_close")
+        pct = None
+        if idx_ltp is not None and idx_pdc not in (None, 0):
+            pct = (float(idx_ltp) - float(idx_pdc)) / float(idx_pdc) * 100
+        index_basis[name] = {"security_id": int(sid), "ltp": idx_ltp, "pdc": idx_pdc, "pct": pct}
 
-    # NIFTY live refresh uses the same saved market security configuration.
-    nifty_sid = market.get("security_id") or market.get("SecurityId")
-    if nifty_sid:
-        nq = client.quotes([nifty_sid], exchange_segment="IDX_I").get(int(nifty_sid))
-        if nq:
-            ltp = nq["ltp"]
-
-    if ltp is not None and pdc:
-        day_pct = (float(ltp) - float(pdc)) / float(pdc) * 100
+    nifty500_basis = index_basis["Nifty 500"]
+    ltp, pdc, day_pct = nifty500_basis.get("ltp"), nifty500_basis.get("pdc"), nifty500_basis.get("pct")
+    all_index_data_valid = all(v.get("pct") is not None for v in index_basis.values())
+    all_indices_buy = all_index_data_valid and all(float(v["pct"]) > 0 for v in index_basis.values())
+    all_indices_sell = all_index_data_valid and all(float(v["pct"]) < 0 for v in index_basis.values())
+    breadth_buy = ad_ratio is not None and ad_ratio > 1
+    breadth_sell = ad_ratio is not None and ad_ratio < 1
+    if breadth_valid and all_indices_buy and breadth_buy:
+        mode = "BUY"
+    elif breadth_valid and all_indices_sell and breadth_sell:
+        mode = "SELL"
     else:
-        day_pct = market.get("day_pct", 0)
-
-    mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
+        mode = "NEUTRAL"
+    market_basis_status = "FULL BUY ALIGNMENT" if mode == "BUY" else ("FULL SELL ALIGNMENT" if mode == "SELL" else "NOT ALIGNED — NO NEW TRADES")
     # Coverage must be measured against UNIQUE official NIFTY 500 Security IDs.
     # universe_ids can also contain strategy rows, so never use its raw length.
     coverage_ids = unique_universe_ids
@@ -390,6 +421,10 @@ def trend_check(state):
         "advances": advances, "declines": declines, "unchanged": unchanged,
         "valid_breadth_stocks": valid_count, "breadth_minimum": 480,
         "breadth_valid": breadth_valid, "sector_breadth": sector_breadth,
+        "index_basis": index_basis,
+        "market_basis_status": market_basis_status,
+        "all_indices_buy": all_indices_buy,
+        "all_indices_sell": all_indices_sell,
         "mode": mode,
         "dhan_universe_total": len(coverage_ids),
         "dhan_ltp_valid": dhan_ltp_valid,
@@ -756,13 +791,17 @@ def cards(pairs, cols=3):
 
 # 1 LIVE MARKET
 st.subheader("📊 Live Market")
-st.dataframe(pd.DataFrame([{
-    "Worker":live_status,
-    "NIFTY 500 LTP":market.get("ltp","—"),
-    "NIFTY % vs PDC":f"{float(market.get('day_pct',0) or 0):.2f}%",
-    "NIFTY 500 A/D":market.get("ad_ratio","—"),
-    "Bias":mode
-}]),use_container_width=True,hide_index=True)
+basis = market.get("index_basis", {}) or {}
+basis_rows = []
+for _name in ["Nifty 50", "Nifty Next 50", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 500"]:
+    _v = basis.get(_name, {})
+    _pct = _v.get("pct")
+    _direction = "🟢 BUY" if _pct is not None and float(_pct) > 0 else ("🔴 SELL" if _pct is not None and float(_pct) < 0 else "⚪ NOT ALIGNED")
+    basis_rows.append({"Index": _name, "LTP": _v.get("ltp", "—"), "Previous Close": _v.get("pdc", "—"), "% Change": "—" if _pct is None else f"{float(_pct):.2f}%", "Direction": _direction})
+st.dataframe(pd.DataFrame(basis_rows), use_container_width=True, hide_index=True)
+_ad = market.get("ad_ratio")
+_ad_direction = "🟢 BUY" if _ad is not None and _ad > 1 else ("🔴 SELL" if _ad is not None and _ad < 1 else "⚪ NOT ALIGNED")
+st.dataframe(pd.DataFrame([{"NIFTY 500 A/D Ratio": "—" if _ad is None else ("∞" if _ad == float("inf") else f"{float(_ad):.3f}"), "Advancing": market.get("advances", 0), "Declining": market.get("declines", 0), "A/D Direction": _ad_direction, "Final Market Basis": market.get("market_basis_status", "NOT ALIGNED — NO NEW TRADES"), "Trade Bias": mode}]), use_container_width=True, hide_index=True)
 st.caption(
     f"Market Breadth • Advancing: {market.get('advances',0)} • "
     f"Declining: {market.get('declines',0)} • "
