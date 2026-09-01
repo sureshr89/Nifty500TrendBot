@@ -791,7 +791,6 @@ with st.expander("🏢 Sector A/D",expanded=False):
 
 # 7 FULL NIFTY 500 LIVE DATA - COLLAPSIBLE
 st.divider()
-dashboard_universe_rows = state.get("breadth_universe", []) or state.get("classified", []) or buy_rows + sell_rows
 with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)} mapped)",expanded=False):
     all_stock_rows = []
     for row in dashboard_universe_rows:
@@ -801,9 +800,11 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
             continue
         # The live table must use the SAME fresh quote snapshot used by A/D.
         # Rows in scan_state are static and do not themselves contain refreshed LTP.
-        q = live_quotes.get(sid, {})
+        q = dashboard_live_quotes.get(sid, {})
         live_ltp = q.get("ltp")
-        row_pdc = q.get("previous_close")
+        row_pdc = dashboard_resolved_pdc.get(sid)
+        if row_pdc is None:
+            row_pdc = q.get("previous_close")
         if row_pdc is None:
             row_pdc = row.get("PDC", row.get("pdc"))
         try:
