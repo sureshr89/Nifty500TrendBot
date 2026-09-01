@@ -195,8 +195,13 @@ def trend_check(state):
     # Dhan quote limits are handled by deterministic batches without creating
     # separate scans for separate purposes.
     unique_universe_ids = sorted(set(universe_ids))
+    if len(unique_universe_ids) < 500:
+        # Never silently fall back to Buy/Sell sets for breadth.
+        # The worker will show the actual mapped universe and refuse new entries
+        # until a complete 500-member state is available.
+        st.error(f"Breadth universe incomplete: {len(unique_universe_ids)} mapped stocks loaded; expected 500.")
     live_quotes = {}
-    quote_batch_size = 100
+    quote_batch_size = 500
     for start in range(0, len(unique_universe_ids), quote_batch_size):
         quote_batch = unique_universe_ids[start:start + quote_batch_size]
         live_quotes.update(
