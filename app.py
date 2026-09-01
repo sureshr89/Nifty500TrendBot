@@ -24,7 +24,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "full500-pdh-pdl-complete-v2"
+APP_BUILD = "dhan-authoritative-live-v3"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -251,12 +251,28 @@ def trend_check(state):
     # Breadth must always use the independently mapped official NIFTY 500.
     # Never inherit the smaller premarket classified/buy/sell state.
     universe_rows = load_full_nifty500_universe()
-    previous_day_ranges = load_previous_day_ranges()
+    # Prefer Dhan historical levels already prepared by the pre-market worker.
+    # NSE data is never used for live LTP, A/D, or trade execution.
+    range_by_sid = {}
+    for _row in state.get("classified", []) or []:
+        try:
+            _sid = int(_row.get("SecurityId"))
+            range_by_sid[_sid] = {
+                "PDH": _row.get("PDH", _row.get("pdh")),
+                "PDL": _row.get("PDL", _row.get("pdl")),
+                "PDC": _row.get("PDC", _row.get("pdc")),
+            }
+        except (TypeError, ValueError):
+            continue
     for _row in universe_rows:
-        _rng = previous_day_ranges.get(str(_row.get("Symbol", "")).upper().strip())
+        try:
+            _rng = range_by_sid.get(int(_row.get("SecurityId")))
+        except (TypeError, ValueError):
+            _rng = None
         if _rng:
             _row["PDH"] = _rng.get("PDH")
             _row["PDL"] = _rng.get("PDL")
+            _row["PDC"] = _rng.get("PDC")
 
     # Quote eligibility must NOT depend on PDC.  A stock can still need a live
     # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
