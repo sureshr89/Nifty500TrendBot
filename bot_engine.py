@@ -260,7 +260,7 @@ def scan_nifty500():
     # A stock can be in breadth but must have complete Dhan historical levels
     # before it is eligible for any strategy set.
     strategy_frame = frame.dropna(subset=["PDH", "PDL", "PDC"]).copy()
-    periods = ["1Y Return %", "6M Return %", "1M Return %", "1W Return %"]
+    periods = ["1Y Return %", "6M Return %", "1M Return %", "1W Return %", "1D Return %"]
     strategy_frame["Trend"] = "MIXED"
     strategy_frame.loc[(strategy_frame[periods] > 0).all(axis=1), "Trend"] = "BULLISH"
     strategy_frame.loc[(strategy_frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
