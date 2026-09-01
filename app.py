@@ -95,12 +95,14 @@ def load_full_nifty500_universe():
     ].copy()
     equity["ISIN"] = equity["ISIN"].astype(str).str.upper().str.strip()
     mapping = equity.drop_duplicates("ISIN").set_index("ISIN")["SECURITY_ID"].to_dict()
+    # NSE is used only to identify the official NIFTY 500 members. Every
+    # tradable identifier below comes from the Dhan NSE_EQ security master.
     nifty["SecurityId"] = nifty["ISIN Code"].map(mapping)
     nifty = nifty.dropna(subset=["SecurityId"]).copy()
     nifty["SecurityId"] = nifty["SecurityId"].astype(int)
     nifty = nifty.drop_duplicates(subset=["SecurityId"]).copy()
     if len(nifty) != 500:
-        raise RuntimeError(f"Official NIFTY 500 mapping incomplete: expected 500, got {len(nifty)}")
+        raise RuntimeError(f"NIFTY 500 membership mapped to Dhan IDs incomplete: expected 500, got {len(nifty)}")
     sector = nifty["Industry"].fillna("Other").astype(str) if "Industry" in nifty.columns else "Other"
     return pd.DataFrame({
         "Company": nifty["Company Name"].astype(str),
@@ -304,6 +306,7 @@ def trend_check(state):
             q = live_quotes.get(int(stock.get("SecurityId")))
             if q:
                 stock["LTP"] = q["ltp"]
+                stock["DHAN_LIVE_VALID"] = bool(q.get("ltp") is not None and float(q.get("ltp") or 0) > 0)
         except (TypeError, ValueError):
             pass
     # Prefer saved PDC; otherwise use the previous-close value returned with
@@ -320,7 +323,14 @@ def trend_check(state):
         if pdc and pdc > 0:
             resolved_pdc[sid] = pdc
 
-    valid_ids = [sid for sid, q in live_quotes.items() if sid in resolved_pdc and q.get("ltp") is not None]
+    # Dhan is the market-data authority. A stock without a Dhan LTP and
+    # Dhan previous-close is excluded from breadth and is never eligible for
+    # strategy entry. NSE membership alone can never make a stock tradable.
+    dhan_valid_ids = [
+        sid for sid, q in live_quotes.items()
+        if sid in resolved_pdc and q.get("ltp") is not None and float(q.get("ltp") or 0) > 0
+    ]
+    valid_ids = dhan_valid_ids
     valid_count = len(valid_ids)
     advances = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] > resolved_pdc[sid])
     declines = sum(1 for sid in valid_ids if live_quotes[sid]["ltp"] < resolved_pdc[sid])
