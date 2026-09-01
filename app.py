@@ -9,7 +9,9 @@ import json
 import time
 import base64
 from datetime import datetime
-from io import StringIO
+from io import StringIO, BytesIO
+import zipfile
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -26,6 +28,39 @@ APP_BUILD = "full500-independent-live-breadth-v1"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def load_previous_day_ranges():
+    """Previous completed NSE equity session HIGH/LOW; cached, not a live scan."""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    today = datetime.now().date()
+    for offset in range(1, 12):
+        d = today - timedelta(days=offset)
+        if d.weekday() >= 5:
+            continue
+        stamp = d.strftime("%d%b%Y").upper()
+        url = f"https://nsearchives.nseindia.com/content/historical/EQUITIES/{d:%Y}/{d.strftime('%b').upper()}/cm{stamp}bhav.csv.zip"
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            if r.status_code != 200:
+                continue
+            with zipfile.ZipFile(BytesIO(r.content)) as z:
+                raw = pd.read_csv(z.open(z.namelist()[0]))
+            cols = {x.upper().strip(): x for x in raw.columns}
+            sym_col, high_col, low_col, series_col = cols.get("SYMBOL"), cols.get("HIGH"), cols.get("LOW"), cols.get("SERIES")
+            if not sym_col or not high_col or not low_col:
+                continue
+            df = raw.copy()
+            if series_col:
+                df = df[df[series_col].astype(str).str.upper().eq("EQ")]
+            df["Symbol"] = df[sym_col].astype(str).str.upper().str.strip()
+            df["PDH"] = pd.to_numeric(df[high_col], errors="coerce")
+            df["PDL"] = pd.to_numeric(df[low_col], errors="coerce")
+            df = df.dropna(subset=["PDH","PDL"]).drop_duplicates("Symbol")
+            return df.set_index("Symbol")[["PDH","PDL"]].to_dict("index")
+        except Exception:
+            continue
+    return {}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_full_nifty500_universe():
@@ -207,6 +242,12 @@ def trend_check(state):
     # Breadth must always use the independently mapped official NIFTY 500.
     # Never inherit the smaller premarket classified/buy/sell state.
     universe_rows = load_full_nifty500_universe()
+    previous_day_ranges = load_previous_day_ranges()
+    for _row in universe_rows:
+        _rng = previous_day_ranges.get(str(_row.get("Symbol", "")).upper().strip())
+        if _rng:
+            _row["PDH"] = _rng.get("PDH")
+            _row["PDL"] = _rng.get("PDL")
 
     # Quote eligibility must NOT depend on PDC.  A stock can still need a live
     # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
@@ -565,7 +606,10 @@ def trend_check(state):
             continue
         _rng = range_by_id.get(_sid)
         if _rng:
-            _row["PDH"], _row["PDL"] = _rng
+            if _row.get("PDH") in (None, ""):
+                _row["PDH"] = _rng[0]
+            if _row.get("PDL") in (None, ""):
+                _row["PDL"] = _rng[1]
     persist_trades(runtime)
     return market, runtime["trades"]
 
