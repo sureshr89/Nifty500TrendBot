@@ -556,11 +556,31 @@ def stats(items):
     cp=[pnl(t) for t in closed]
     wins=sum(x>0 for x in cp); losses=sum(x<0 for x in cp)
     caps=[capital(t) for t in items if capital(t)>0]
+
+    # Max Capital Used means TOTAL capital deployed simultaneously, not the
+    # largest single trade. Build an entry/exit exposure timeline.
+    events=[]
+    for idx,t in enumerate(items):
+        cap=capital(t)
+        if cap<=0:
+            continue
+        entry_time=str(t.get("entry_time",""))
+        events.append((entry_time, 1, cap, idx))
+        if t.get("status")=="CLOSED" and t.get("exit_time"):
+            # Exit is processed after an entry at the same timestamp.
+            events.append((str(t.get("exit_time","")), 0, -cap, idx))
+    events.sort(key=lambda x:(x[0], -x[1], x[3]))
+    running_cap=0.0
+    max_deployed=0.0
+    for _,_,delta,_ in events:
+        running_cap += delta
+        max_deployed=max(max_deployed,running_cap)
+
     return {
         "taken":len(items),"open":len(opened),"closed":len(closed),
         "wins":wins,"losses":losses,"winpct":wins/len(closed)*100 if closed else 0,
         "realized":sum(cp),"live":sum(pnl(t) for t in opened),
-        "maxcap":max(caps) if caps else 0,"mincap":min(caps) if caps else 0,
+        "maxcap":max_deployed,"mincap":min(caps) if caps else 0,
         "avgwin":sum(x for x in cp if x>0)/wins if wins else 0,
         "avgloss":sum(x for x in cp if x<0)/losses if losses else 0,
         "maxprofit":max(cp) if cp else 0,"maxloss":min(cp) if cp else 0,
