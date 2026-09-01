@@ -525,7 +525,7 @@ def stats(items):
         "expectancy":sum(cp)/len(cp) if cp else 0
     }
 
-def cards(pairs, cols=3):
+def cards(pairs, cols=2):
     for i in range(0,len(pairs),cols):
         row=st.columns(cols)
         for j,(label,value) in enumerate(pairs[i:i+cols]):
@@ -575,7 +575,7 @@ with st.expander("📅 Today's Performance",expanded=True):
         ("Wins",s["wins"]),("Losses",s["losses"]),("Win %",f"{s['winpct']:.2f}%"),
         ("Realized P&L",f"₹{s['realized']:,.2f}"),("Live P&L",f"₹{s['live']:,.2f}"),("Total P&L",f"₹{s['realized']+s['live']:,.2f}"),
         ("Max Capital Used",f"₹{s['maxcap']:,.2f}"),("Min Capital Used",f"₹{s['mincap']:,.2f}")
-    ],3)
+    ],2)
 
 # 4 ALL TRADES + CUMULATIVE CARDS
 st.divider()
@@ -595,7 +595,7 @@ cards([
     ("Expectancy / Closed Trade",f"₹{cs['expectancy']:,.2f}"),("Max Profit",f"₹{cs['maxprofit']:,.2f}"),("Max Loss",f"₹{cs['maxloss']:,.2f}"),
     ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}"),
     ("Max Capital Used",f"₹{cs['maxcap']:,.2f}"),("Min Capital Used",f"₹{cs['mincap']:,.2f}")
-],3)
+],2)
 
 # 5 BUY / SELL
 def show_set(title,rows,icon):
