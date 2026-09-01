@@ -439,148 +439,155 @@ def trend_check(state):
     persist_trades(runtime)
     return market, runtime["trades"]
 
-# --------------------------- Professional mobile dashboard ---------------------------
+# --------------------------- Dashboard ---------------------------
 st.markdown("""
 <style>
-.block-container {max-width: 1200px; padding-top: 1rem; padding-bottom: 2rem;}
-[data-testid="stMetric"] {background: rgba(255,255,255,.04); border: 1px solid rgba(128,128,128,.18); border-radius: 14px; padding: 10px 12px;}
-[data-testid="stMetricLabel"] {font-size: .78rem;}
-[data-testid="stMetricValue"] {font-size: 1.15rem;}
-div[data-testid="stExpander"] {border-radius: 12px;}
-@media (max-width: 640px) {
-  .block-container {padding-left: .65rem; padding-right: .65rem; padding-top: .5rem;}
-  h1 {font-size: 1.55rem !important;}
-  [data-testid="stMetric"] {padding: 8px;}
-  [data-testid="stMetricValue"] {font-size: 1rem;}
-}
+.block-container {max-width:1200px;padding-top:1rem;padding-bottom:2rem;}
+div[data-testid="stExpander"] {border-radius:10px;}
 </style>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
 st.caption("Live Dhan monitoring • S1 / S2 / S3 / S4 paper strategies")
-st.caption(f"IST • {now_ist():%d %b %Y, %H:%M:%S}  |  🔄 Auto refresh: 15 sec")
 
 try:
-    state = load_premarket_state()
-    market, trades = trend_check(state)
-    live_status = "🟢 ACTIVE"
+    state=load_premarket_state()
+    market,trades=trend_check(state)
+    live_status="🟢 ACTIVE"
 except Exception as exc:
-    state = {}
-    market = {}
-    trades = st.session_state.get("trend_runtime", {}).get("trades", [])
-    live_status = "🔴 ERROR"
+    state={}; market={}; trades=[]
+    live_status="🔴 ERROR"
     st.error(str(exc))
 
-buy_rows = state.get("buy_set", [])
-sell_rows = state.get("sell_set", [])
-mode = market.get("mode", "NEUTRAL")
+buy_rows=state.get("buy_set",[])
+sell_rows=state.get("sell_set",[])
+mode=market.get("mode","NEUTRAL")
 
-st.subheader("Live Market")
-top1, top2 = st.columns(2)
-top1.metric("Worker", live_status)
-top2.metric("Market Mode", mode)
+def pnl(t):
+    q=float(t.get("quantity",0) or 0); e=float(t.get("entry_price",0) or 0)
+    px=t.get("exit_price") if t.get("status")=="CLOSED" else None
+    if px is None:
+        try:
+            quote=market.get("live_quotes",{}).get(int(t.get("SecurityId")))
+            px=quote.get("ltp") if quote else e
+        except Exception: px=e
+    px=float(px or e)
+    return (px-e)*q if t.get("side")=="BUY" else (e-px)*q
 
-m1, m2, m3 = st.columns(3)
-m1.metric("NIFTY 500", market.get("ltp", "—"))
-m2.metric("Day %", f"{float(market.get('day_pct', 0)):.2f}%")
-m3.metric("A/D Ratio", market.get("ad_ratio", "—"))
+def capital(t):
+    return float(t.get("entry_price",0) or 0)*float(t.get("quantity",0) or 0)
 
-st.caption(f"PDC: {market.get('pdc', '—')} • Breadth: {market.get('valid_breadth_stocks', 0)} valid quotes • Adv: {market.get('advances', 0)} • Dec: {market.get('declines', 0)} • Unch: {market.get('unchanged', 0)} • Last live check: {now_ist():%H:%M:%S IST}")
+def trade_df(items):
+    data=[]
+    for t in items:
+        data.append({
+            "Date":str(t.get("entry_time",""))[:10],
+            "Strategy":t.get("strategy","—"),"Side":t.get("side","—"),
+            "Symbol":t.get("Symbol","—"),
+            "Stock Name":t.get("Company") or t.get("Stock Name") or t.get("Symbol","—"),
+            "Entry Time":t.get("entry_time","—"),"Entry":t.get("entry_price"),
+            "Qty":t.get("quantity"),"Capital Used":capital(t),"SL":t.get("SL"),
+            "Target":t.get("target"),"Status":t.get("status","—"),
+            "Exit Time":t.get("exit_time","—"),"Exit Price":t.get("exit_price"),
+            "Exit Reason":t.get("exit_reason","OPEN" if t.get("status")=="OPEN" else "—"),
+            "P&L":pnl(t)
+        })
+    return pd.DataFrame(data)
 
-sector_breadth = market.get("sector_breadth", {})
-if sector_breadth:
-    sector_rows = [{"Sector": s, **v} for s, v in sorted(sector_breadth.items())]
-    sector_frame = pd.DataFrame(sector_rows)
-    with st.expander("🏢 Live Sector A/D Confirmation", expanded=True):
-        st.caption("BUY trades require the stock's Sector A/D > 1. SELL trades require the stock's Sector A/D < 1. Missing/neutral sector breadth blocks new entries.")
-        st.dataframe(
-            sector_frame,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Sector": st.column_config.TextColumn("Sector", width="medium"),
-                "advances": st.column_config.NumberColumn("Adv", format="%d"),
-                "declines": st.column_config.NumberColumn("Dec", format="%d"),
-                "unchanged": st.column_config.NumberColumn("Unch", format="%d"),
-                "valid": st.column_config.NumberColumn("Valid", format="%d"),
-                "ad_ratio": st.column_config.NumberColumn("A/D Ratio", format="%.2f"),
-            },
-        )
+def stats(items):
+    closed=[t for t in items if t.get("status")=="CLOSED"]
+    opened=[t for t in items if t.get("status")=="OPEN"]
+    cp=[pnl(t) for t in closed]
+    wins=sum(x>0 for x in cp); losses=sum(x<0 for x in cp)
+    caps=[capital(t) for t in items if capital(t)>0]
+    return {
+        "taken":len(items),"open":len(opened),"closed":len(closed),
+        "wins":wins,"losses":losses,"winpct":wins/len(closed)*100 if closed else 0,
+        "realized":sum(cp),"live":sum(pnl(t) for t in opened),
+        "maxcap":max(caps) if caps else 0,"mincap":min(caps) if caps else 0,
+        "avgwin":sum(x for x in cp if x>0)/wins if wins else 0,
+        "avgloss":sum(x for x in cp if x<0)/losses if losses else 0,
+        "maxprofit":max(cp) if cp else 0,"maxloss":min(cp) if cp else 0
+    }
 
-st.divider()
-st.subheader("🎯 Strategy Status — S1 / S2 / S3 / S4")
-s1a, s1b, s1c = st.columns(3)
-s1a.metric("Entry Window", "09:30–13:00")
-s1b.metric("Pullback", "0.15%")
-s1c.metric("Square-off", "14:55")
+# 1. LIVE MARKET
+st.subheader("📊 Live Market")
+st.dataframe(pd.DataFrame([{
+    "Worker":live_status,
+    "NIFTY 500 LTP":market.get("ltp","—"),
+    "NIFTY % vs PDC":f"{float(market.get('day_pct',0) or 0):.2f}%",
+    "NIFTY 500 A/D":market.get("ad_ratio","—"),
+    "Bias":mode
+}]),use_container_width=True,hide_index=True)
 
-st.caption("S1 BUY: Open > PDH → Low ≤ PDH − 0.15% → reclaim PDH | S1 SELL: Open < PDL → High ≥ PDL + 0.15% → break PDL")
-st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim PDL | S2 SELL: Open between PDL & PDH → High ≥ PDH + 0.15% → break PDH")
-st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R\n\nS4 BUY: Open between PDL & PDH → break above PDH | S4 SELL: Open between PDL & PDH → break below PDL | S4 target = 1.25R")
+# 2. STRATEGY TABLE
+st.divider(); st.subheader("🎯 S1 / S2 / S3 / S4")
+rules=[
+["S1","BUY","09:30–13:00","Open > PDH → pullback 0.15% → reclaim PDH","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
+["S1","SELL","09:30–13:00","Open < PDL → pullback 0.15% → break PDL","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
+["S2","BUY","09:30–13:00","Open inside range → below PDL 0.15% → reclaim PDL","PDL−(PDH−PDL)/2","1.25R","SL / Target / 14:55"],
+["S2","SELL","09:30–13:00","Open inside range → above PDH 0.15% → break PDH","PDH+(PDH−PDL)/2","1.25R","SL / Target / 14:55"],
+["S3","BUY","09:30–13:00","Open < PDL → reclaim PDL","Today's Low","1.25R","SL / Target / 14:55"],
+["S3","SELL","09:30–13:00","Open > PDH → break below PDH","Today's High","1.25R","SL / Target / 14:55"],
+["S4","BUY","09:30–13:00","Open inside range → cross PDH","(PDH+PDL)/2","1.25R","SL / Target / 14:55"],
+["S4","SELL","09:30–13:00","Open inside range → cross PDL","(PDH+PDL)/2","1.25R","SL / Target / 14:55"]]
+st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Time","Entry Reason","SL","Target","Exit"]),use_container_width=True,hide_index=True)
 
-open_positions = [t for t in trades if t.get("status") == "OPEN"]
+# 3. TODAY
+today=now_ist().strftime("%Y-%m-%d")
+today_items=[t for t in trades if str(t.get("entry_time","")).startswith(today)]
+st.divider(); st.subheader("📅 Today's Performance")
+tdf=trade_df(today_items)
+if tdf.empty: st.caption("No trades taken today.")
+else: st.dataframe(tdf,use_container_width=True,hide_index=True)
+s=stats(today_items)
+st.caption(f"Trades Taken: {s['taken']} • Open: {s['open']} • Closed: {s['closed']} • Wins: {s['wins']} • Losses: {s['losses']} • Win %: {s['winpct']:.2f}% • Realized P&L: ₹{s['realized']:,.2f} • Live P&L: ₹{s['live']:,.2f} • Total P&L: ₹{s['realized']+s['live']:,.2f} • Max Capital Used: ₹{s['maxcap']:,.2f} • Min Capital Used: ₹{s['mincap']:,.2f}")
 
-# Portfolio metrics are display-only: they do not change any entry/exit logic.
-total_capital_used = 0.0
-total_live_pnl = 0.0
-for open_trade in open_positions:
-    qty = float(open_trade.get("quantity", 0) or 0)
-    entry = float(open_trade.get("entry_price", 0) or 0)
-    sid = open_trade.get("SecurityId")
-    total_capital_used += entry * qty
-    try:
-        live_q = market.get("live_quotes", {}).get(int(sid)) if isinstance(market.get("live_quotes"), dict) else None
-    except (TypeError, ValueError):
-        live_q = None
-    # Fallback to the trade's latest display price if a future state stores it.
-    live_ltp = float(live_q.get("ltp")) if live_q else float(open_trade.get("live_ltp", entry) or entry)
-    if open_trade.get("side") == "BUY":
-        total_live_pnl += (live_ltp - entry) * qty
-    else:
-        total_live_pnl += (entry - live_ltp) * qty
+# 4. ALL TRADES
+st.divider(); st.subheader("📂 All Trades")
+adf=trade_df(trades)
+with st.expander(f"Show complete trade history ({len(trades)})",expanded=False):
+    if adf.empty: st.caption("No paper trades yet.")
+    else: st.dataframe(adf,use_container_width=True,hide_index=True)
+cs=stats(trades)
+st.markdown("**Cumulative Performance**")
+st.caption(f"Total Trades: {cs['taken']} • Closed: {cs['closed']} • Open: {cs['open']} • Wins: {cs['wins']} • Losses: {cs['losses']} • Overall Win %: {cs['winpct']:.2f}% • Total Realized P&L: ₹{cs['realized']:,.2f} • Live P&L: ₹{cs['live']:,.2f} • Total P&L: ₹{cs['realized']+cs['live']:,.2f} • Average Win: ₹{cs['avgwin']:,.2f} • Average Loss: ₹{cs['avgloss']:,.2f} • Max Profit: ₹{cs['maxprofit']:,.2f} • Max Loss: ₹{cs['maxloss']:,.2f} • Max Capital Used: ₹{cs['maxcap']:,.2f} • Min Capital Used: ₹{cs['mincap']:,.2f}")
 
-p1, p2, p3 = st.columns(3)
-p1.metric("Open Positions", f"{len(open_positions)} / 4")
-p2.metric("Capital Used", f"₹{total_capital_used:,.2f}")
-p3.metric("Live P&L", f"₹{total_live_pnl:,.2f}")
+def show_set(title,rows,icon):
+    with st.expander(f"{icon} {title} ({len(rows)})",expanded=False):
+        if not rows: st.caption("No stocks in this set."); return
+        df=pd.DataFrame(rows)
+        preferred=["Symbol","Company","Sector","Trend","LTP","1Y Return %","6M Return %","1M Return %","1W Return %","1D Return %","PDH","PDL"]
+        cols=[x for x in preferred if x in df.columns]
+        st.dataframe(df[cols] if cols else df,use_container_width=True,hide_index=True)
 
-if open_positions:
-    st.success(f"{len(open_positions)} OPEN POSITION(S) • Maximum 4")
-    for open_trade in open_positions:
-        st.markdown(f"**{open_trade.get('strategy')} • {open_trade.get('side')} • {open_trade.get('Symbol')}**")
-        a,b,c1,d,e = st.columns(5)
-        a.metric("Entry", f"₹{open_trade.get('entry_price', 0):.2f}")
-        b.metric("SL", f"₹{open_trade.get('SL', 0):.2f}")
-        c1.metric("Target", f"₹{open_trade.get('target', 0):.2f}")
-        d.metric("Qty", open_trade.get("quantity", 0))
-        e.metric("Risk", f"₹{open_trade.get('risk_amount', 0):.2f}")
-else:
-    st.info("No open S1 / S2 / S3 / S4 paper position")
+# 5. BUY / SELL
+st.divider(); st.subheader("Stock Sets")
+show_set("BUY SET",buy_rows,"🟢")
+show_set("SELL SET",sell_rows,"🔴")
 
-st.divider()
-st.subheader("📋 S1 / S2 / S3 / S4 Trade History")
-if trades:
-    trade_frame = pd.DataFrame(trades)
-    mobile_cols = [c for c in ["strategy","Symbol","side","status","entry_price","quantity","risk_amount","SL","target","exit_price","exit_reason","entry_time"] if c in trade_frame.columns]
-    st.dataframe(trade_frame[mobile_cols], use_container_width=True, hide_index=True)
-else:
-    st.caption("No paper trades yet.")
+# 6. SECTOR A/D
+st.divider(); st.subheader("🏢 Sector A/D")
+sb=market.get("sector_breadth",{})
+if sb:
+    sdf=pd.DataFrame([{"Sector":name,**vals} for name,vals in sb.items()])
+    if "ad_ratio" in sdf.columns: sdf=sdf.sort_values("ad_ratio",ascending=False)
+    st.dataframe(sdf,use_container_width=True,hide_index=True)
+else: st.caption("Sector A/D data will appear with live valid quotes.")
 
-def show_set(title, rows, icon):
-    with st.expander(f"{icon} {title} ({len(rows)})", expanded=False):
-        if not rows:
-            st.caption("No stocks in this set.")
-            return
-        frame = pd.DataFrame(rows)
-        preferred = ["Symbol", "Company", "Sector", "Trend", "LTP", "1Y Return %", "6M Return %", "1M Return %", "1W Return %", "1D Return %", "PDH", "PDL", "SecurityId"]
-        cols = [x for x in preferred if x in frame.columns]
-        st.dataframe(frame[cols] if cols else frame, use_container_width=True, hide_index=True)
+# 7. MONTH-WISE
+st.divider(); st.subheader("📥 Month-wise Cumulative Performance")
+if not adf.empty:
+    x=adf.copy(); x["Month"]=pd.to_datetime(x["Date"],errors="coerce").dt.strftime("%Y-%m")
+    rows=[]
+    for month,g in x.dropna(subset=["Month"]).groupby("Month"):
+        closed=g[g["Status"]=="CLOSED"]; wins=int((closed["P&L"]>0).sum()); losses=int((closed["P&L"]<0).sum())
+        rows.append({"Month":month,"Trades":len(g),"Wins":wins,"Losses":losses,"Win %":wins/len(closed)*100 if len(closed) else 0,
+            "Realized P&L":float(closed["P&L"].sum()),"Live P&L":float(g[g["Status"]=="OPEN"]["P&L"].sum()),
+            "Total P&L":float(g["P&L"].sum()),"Max Capital Used":float(g["Capital Used"].max()),"Min Capital Used":float(g["Capital Used"].min())})
+    mdf=pd.DataFrame(rows)
+    st.dataframe(mdf,use_container_width=True,hide_index=True)
+    st.download_button("📥 Download Month-wise Performance CSV",mdf.to_csv(index=False).encode("utf-8"),"nifty500_trend_bot_monthly_performance.csv","text/csv")
+else: st.caption("Month-wise data will build from persistent trade history.")
 
-st.divider()
-st.subheader("Stock Sets — Full Trend Qualification")
-st.caption("Every stock below shows the exact 1Y, 6M, 1M and 1W returns used to qualify it. S1/S2/S3/S4 must select candidates only from the matching set.")
-show_set("BUY SET", buy_rows, "🟢")
-show_set("SELL SET", sell_rows, "🔴")
-
-st.caption("Live worker runs while this Streamlit session remains active. Dhan credentials are kept in Streamlit Secrets.")
-
+st.caption("Persistent trade history is retained separately. Dashboard layout changes do not change entry, exit, SL, target, timing, sector filtering or risk logic.")
