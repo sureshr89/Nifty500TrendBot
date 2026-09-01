@@ -365,12 +365,15 @@ def trend_check(state):
         day_pct = market.get("day_pct", 0)
 
     mode = "BUY" if breadth_valid and day_pct > 0 and ad_ratio is not None and ad_ratio > 1 else ("SELL" if breadth_valid and day_pct < 0 and ad_ratio is not None and ad_ratio < 1 else "NEUTRAL")
+    # Coverage must be measured against UNIQUE official NIFTY 500 Security IDs.
+    # universe_ids can also contain strategy rows, so never use its raw length.
+    coverage_ids = unique_universe_ids
     dhan_ltp_valid = sum(
-        1 for _sid in universe_ids
+        1 for _sid in coverage_ids
         if (_sid in live_quotes and live_quotes[_sid].get("ltp") is not None and float(live_quotes[_sid].get("ltp") or 0) > 0)
     )
-    dhan_ltp_missing = max(0, len(universe_ids) - dhan_ltp_valid)
-    dhan_pdc_valid = sum(1 for _sid in universe_ids if _sid in resolved_pdc and resolved_pdc[_sid] is not None)
+    dhan_ltp_missing = max(0, len(coverage_ids) - dhan_ltp_valid)
+    dhan_pdc_valid = sum(1 for _sid in coverage_ids if _sid in resolved_pdc and resolved_pdc[_sid] is not None)
     dhan_ad_valid = valid_count
     market.update({
         "ltp": ltp, "day_pct": day_pct, "ad_ratio": ad_ratio,
@@ -378,12 +381,12 @@ def trend_check(state):
         "valid_breadth_stocks": valid_count, "breadth_minimum": 480,
         "breadth_valid": breadth_valid, "sector_breadth": sector_breadth,
         "mode": mode,
-        "dhan_universe_total": len(universe_ids),
+        "dhan_universe_total": len(coverage_ids),
         "dhan_ltp_valid": dhan_ltp_valid,
         "dhan_ltp_missing": dhan_ltp_missing,
         "dhan_pdc_valid": dhan_pdc_valid,
         "dhan_ad_valid": dhan_ad_valid,
-        "dhan_quote_coverage_pct": (dhan_ltp_valid / len(universe_ids) * 100) if universe_ids else 0,
+        "dhan_quote_coverage_pct": (dhan_ltp_valid / len(coverage_ids) * 100) if coverage_ids else 0,
     })
 
     if "trend_runtime" not in st.session_state:
