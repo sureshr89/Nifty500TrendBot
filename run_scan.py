@@ -20,9 +20,13 @@ def premarket():
     result = scan_nifty500()
     result["classified"].to_csv(RANKING_FILE, index=False)
 
-    # Keep every NIFTY 500 member for live A/D. Historical trend failures must
-    # not shrink the live breadth universe.
-    breadth_universe = result["classified"].copy()
+    # Keep every mapped NIFTY 500 member for live A/D. Historical trend
+    # failures must never shrink the live breadth universe.
+    breadth_universe = result.get("breadth_universe", result["classified"]).copy()
+    if len(breadth_universe) != 500:
+        raise RuntimeError(
+            f"Live breadth universe must contain all 500 NIFTY members; got {len(breadth_universe)}"
+        )
     state = {
         "health": {
             "worker_status": "ok",
