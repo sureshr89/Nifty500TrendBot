@@ -665,8 +665,7 @@ cards([
     ("Realized P&L",f"₹{cs['realized']:,.2f}"),("Live P&L",f"₹{cs['live']:,.2f}"),("Total P&L",f"₹{cs['realized']+cs['live']:,.2f}"),
     ("Average Win",f"₹{cs['avgwin']:,.2f}"),("Average Loss",f"₹{cs['avgloss']:,.2f}"),("Profit Factor",f"{cs['profitfactor']:.2f}"),
     ("Expectancy / Closed Trade",f"₹{cs['expectancy']:,.2f}"),("Max Profit",f"₹{cs['maxprofit']:,.2f}"),("Max Loss",f"₹{cs['maxloss']:,.2f}"),
-    ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}"),
-    ("Max Capital Used",f"₹{cs['maxcap']:,.2f}"),("Min Capital Used",f"₹{cs['mincap']:,.2f}")
+    ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}")
 ],3)
 
 # 5 BUY / SELL
