@@ -790,6 +790,10 @@ with st.expander("🏢 Sector A/D",expanded=False):
         st.caption("Sector A/D data will appear with live valid quotes.")
 
 # 7 FULL NIFTY 500 LIVE DATA - COLLAPSIBLE
+# trend_check owns the one shared 15-second quote scan; read its returned snapshot.
+dashboard_universe_rows = market.get("breadth_universe_rows", load_full_nifty500_universe())
+dashboard_live_quotes = market.get("live_quotes", {})
+dashboard_resolved_pdc = market.get("resolved_pdc", {})
 st.divider()
 with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)} mapped)",expanded=False):
     all_stock_rows = []
