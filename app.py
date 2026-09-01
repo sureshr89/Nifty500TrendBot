@@ -9,6 +9,7 @@ import json
 import time
 import base64
 from datetime import datetime
+from io import StringIO
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -21,10 +22,50 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "ad-previous-close-v7"
+APP_BUILD = "full500-independent-live-breadth-v1"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_full_nifty500_universe():
+    """Independent live breadth universe: always map the official 500 constituents.
+
+    This deliberately does not depend on the premarket classified/buy/sell sets.
+    """
+    nse = requests.get(
+        "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv",
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30,
+    )
+    nse.raise_for_status()
+    nifty = pd.read_csv(StringIO(nse.text))
+    master = pd.read_csv(
+        "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+        low_memory=False,
+    )
+    nifty["ISIN Code"] = nifty["ISIN Code"].astype(str).str.upper().str.strip()
+    equity = master[
+        master["EXCH_ID"].astype(str).str.upper().eq("NSE")
+        & master["SEGMENT"].astype(str).str.upper().eq("E")
+        & master["INSTRUMENT"].astype(str).str.upper().eq("EQUITY")
+        & master["SERIES"].astype(str).str.upper().eq("EQ")
+    ].copy()
+    equity["ISIN"] = equity["ISIN"].astype(str).str.upper().str.strip()
+    mapping = equity.drop_duplicates("ISIN").set_index("ISIN")["SECURITY_ID"].to_dict()
+    nifty["SecurityId"] = nifty["ISIN Code"].map(mapping)
+    nifty = nifty.dropna(subset=["SecurityId"]).copy()
+    nifty["SecurityId"] = nifty["SecurityId"].astype(int)
+    nifty = nifty.drop_duplicates(subset=["SecurityId"]).copy()
+    if len(nifty) != 500:
+        raise RuntimeError(f"Official NIFTY 500 mapping incomplete: expected 500, got {len(nifty)}")
+    sector = nifty["Industry"].fillna("Other").astype(str) if "Industry" in nifty.columns else "Other"
+    return pd.DataFrame({
+        "Company": nifty["Company Name"].astype(str),
+        "Symbol": nifty["Symbol"].astype(str).str.upper().str.strip(),
+        "Sector": sector,
+        "SecurityId": nifty["SecurityId"],
+    }).to_dict(orient="records")
 
 @st.cache_data(ttl=10, show_spinner=False)
 def load_premarket_state():
@@ -163,8 +204,9 @@ def trend_check(state):
     market = dict(state.get("market", {}))
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
-    # Build live breadth universe and fetch NSE equities once per refresh.
-    universe_rows = state.get("breadth_universe", []) or state.get("classified", []) or buy_rows + sell_rows
+    # Breadth must always use the independently mapped official NIFTY 500.
+    # Never inherit the smaller premarket classified/buy/sell state.
+    universe_rows = load_full_nifty500_universe()
 
     # Quote eligibility must NOT depend on PDC.  A stock can still need a live
     # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
