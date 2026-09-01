@@ -138,23 +138,59 @@ def calculate_advance_decline(frame):
     return advances, declines, ad_ratio
 
 
-def fetch_nifty500_index(client):
-    master = pd.read_csv("https://images.dhan.co/api-data/api-scrip-master-detailed.csv", low_memory=False)
-    rows = master[
-        master["DISPLAY_NAME"].astype(str).str.upper().eq("NIFTY 500")
-        & master["SEGMENT"].astype(str).str.upper().eq("I")
-    ]
-    if rows.empty:
-        raise RuntimeError("Dhan NIFTY 500 index security ID not found")
-    security_id = int(rows.iloc[0]["SECURITY_ID"])
-    data = client.post("/marketfeed/ohlc", {"IDX_I": [security_id]})
-    quote = ((data.get("data") or {}).get("IDX_I") or {}).get(str(security_id), {})
-    ltp = quote.get("last_price")
-    pdc = quote.get("previous_close") or (quote.get("ohlc") or {}).get("close")
-    if ltp is None or pdc is None:
-        raise RuntimeError("Dhan did not return NIFTY 500 LTP/PDC")
-    return float(ltp), float(pdc), security_id
+def _norm_index_name(value):
+    return " ".join(
+        str(value).upper().replace("&", " AND ").replace("-", " ").replace("_", " ").replace("/", " ").split()
+    )
 
+
+def load_dhan_broad_index_ids():
+    """Resolve the five required broad-market index Security IDs from Dhan's master."""
+    master = pd.read_csv("https://images.dhan.co/api-data/api-scrip-master-detailed.csv", low_memory=False)
+    if "SECURITY_ID" not in master.columns:
+        raise RuntimeError("Dhan security master missing SECURITY_ID")
+    name_cols = [x for x in ["DISPLAY_NAME", "UNDERLYING_SYMBOL", "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME"] if x in master.columns]
+    aliases = {
+        "Nifty 50": ["NIFTY 50", "NIFTY"],
+        "Nifty Next 50": ["NIFTY NEXT 50", "NIFTY NEXT50"],
+        "Nifty Midcap 150": ["NIFTY MIDCAP 150", "NIFTY MIDCAP150"],
+        "Nifty Smallcap 250": ["NIFTY SMALLCAP 250", "NIFTY SMALLCAP250"],
+        "Nifty 500": ["NIFTY 500"],
+    }
+    normalized = {col: master[col].map(_norm_index_name) for col in name_cols}
+    out = {}
+    for label, choices in aliases.items():
+        hit = None
+        for choice in choices:
+            choice = _norm_index_name(choice)
+            mask = pd.Series(False, index=master.index)
+            for col in name_cols:
+                mask = mask | normalized[col].eq(choice)
+            rows = master[mask]
+            if len(rows):
+                hit = rows.iloc[0]
+                break
+        if hit is None:
+            raise RuntimeError(f"Dhan index security ID not found for {label}")
+        out[label] = int(hit["SECURITY_ID"])
+    return out
+
+
+def fetch_broad_market_indices(client):
+    """Fetch live LTP and previous close for all mandatory broad indices from Dhan."""
+    ids = load_dhan_broad_index_ids()
+    data = client.post("/marketfeed/ohlc", {"IDX_I": list(ids.values())})
+    quotes = ((data.get("data") or {}).get("IDX_I") or {})
+    result = {}
+    for name, sid in ids.items():
+        q = quotes.get(str(sid), quotes.get(sid, {}))
+        ltp = q.get("last_price")
+        pdc = q.get("previous_close") or (q.get("ohlc") or {}).get("close")
+        if ltp is None or pdc in (None, 0):
+            raise RuntimeError(f"Dhan did not return LTP/PDC for {name}")
+        ltp, pdc = float(ltp), float(pdc)
+        result[name] = {"security_id": sid, "ltp": ltp, "pdc": pdc, "day_pct": (ltp - pdc) / pdc * 100.0}
+    return result
 
 def fetch_equity_ohlc(client, security_ids):
     ids = [int(x) for x in security_ids]
@@ -230,11 +266,14 @@ def scan_nifty500():
     strategy_frame.loc[(strategy_frame[periods] < 0).all(axis=1), "Trend"] = "BEARISH"
 
     advances, declines, ad_ratio = calculate_advance_decline(strategy_frame)
-    ltp, pdc, nifty_security_id = fetch_nifty500_index(client)
-    day_pct = ((ltp - pdc) / pdc * 100.0) if pdc else 0.0
-    if day_pct > 0 and ad_ratio > 1:
+    index_basis = fetch_broad_market_indices(client)
+    nifty500 = index_basis["Nifty 500"]
+    ltp, pdc, day_pct, nifty_security_id = nifty500["ltp"], nifty500["pdc"], nifty500["day_pct"], nifty500["security_id"]
+    all_indices_buy = all(float(v["day_pct"]) > 0 for v in index_basis.values())
+    all_indices_sell = all(float(v["day_pct"]) < 0 for v in index_basis.values())
+    if all_indices_buy and ad_ratio > 1:
         mode = "BUY"
-    elif day_pct < 0 and ad_ratio < 1:
+    elif all_indices_sell and ad_ratio < 1:
         mode = "SELL"
     else:
         mode = "NEUTRAL"
@@ -248,6 +287,8 @@ def scan_nifty500():
             "declines": declines,
             "ad_ratio": ad_ratio,
             "mode": mode,
+            "index_basis": index_basis,
+            "market_basis_status": "FULL BUY ALIGNMENT" if mode == "BUY" else ("FULL SELL ALIGNMENT" if mode == "SELL" else "NOT ALIGNED — NO NEW TRADES"),
             "security_id": nifty_security_id,
         },
         # Keep the complete 500-member universe separate from the scan-success
