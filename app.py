@@ -248,10 +248,10 @@ def trend_check(state):
         adv, dec = bucket["advances"], bucket["declines"]
         bucket["ad_ratio"] = (adv / dec) if dec > 0 else (float("inf") if adv > 0 else None)
 
-    # Use every valid Dhan quote available. Do not block A/D behind an arbitrary
-    # 480-stock threshold; the dashboard should show live breadth whenever Dhan
-    # returns enough advancing/declining data to calculate it.
-    breadth_valid = valid_count > 0
+    # A/D may be displayed at any coverage, but it is VALID FOR NEW TRADES
+    # only when at least 480 of the 500 NIFTY 500 stocks have valid LTP + PDC.
+    # Existing open positions are monitored independently below.
+    breadth_valid = valid_count >= 480
     if declines > 0:
         ad_ratio = advances / declines
     elif advances > 0:
@@ -320,7 +320,11 @@ def trend_check(state):
 
     # New S1/S2/S3/S4 entries: maximum 4 positions total, one OPEN per strategy.
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
-    if len(open_trades) < 4 and in_entry_window(dt) and mode in ("BUY", "SELL"):
+    # Never allow a new entry on incomplete breadth coverage.
+    # This explicit check is kept here as a second safety gate even if mode logic changes.
+    if (len(open_trades) < 4 and in_entry_window(dt)
+            and breadth_valid and valid_count >= 480
+            and mode in ("BUY", "SELL")):
         candidates = buy_rows if mode == "BUY" else sell_rows
 
         # Priority across stocks: strongest sector breadth first for BUY,
