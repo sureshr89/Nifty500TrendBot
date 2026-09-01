@@ -132,6 +132,28 @@ def persist_trades(runtime):
     response = requests.put(_github_trade_state_url(), headers=headers, json=body, timeout=15)
     response.raise_for_status()
 
+def clean_trade_history(trades):
+    """Keep only trades matching the current clean sizing rules."""
+    cleaned = []
+    for t in trades or []:
+        try:
+            entry = float(t.get("entry_price", 0) or 0)
+            qty = float(t.get("quantity", 0) or 0)
+            rps = abs(float(t.get("risk_per_share", 0) or 0))
+            cap = entry * qty
+            risk = rps * qty
+            sl = float(t.get("SL"))
+            target = float(t.get("target"))
+            reward = (target - entry) if t.get("side") == "BUY" else (entry - target)
+            rr = reward / rps if rps > 0 else -1
+            if (entry > 0 and qty > 0 and cap <= 150000.0 + 1e-6 and
+                    1000.0 - 1e-6 <= risk <= 1500.0 + 1e-6 and
+                    abs(rr - 1.125) < 1e-6):
+                cleaned.append(t)
+        except Exception:
+            pass
+    return cleaned
+
 def trend_check(state):
     client = DhanLiveClient()
     market = dict(state.get("market", {}))
@@ -251,7 +273,12 @@ def trend_check(state):
 
     if "trend_runtime" not in st.session_state:
         persisted = load_persisted_trades()
-        st.session_state.trend_runtime = persisted if persisted is not None else {"trades": [], "last_ltp": {}}
+        persisted = persisted if persisted is not None else {"trades": [], "last_ltp": {}}
+        original_trades = persisted.get("trades", [])
+        persisted["trades"] = clean_trade_history(original_trades)
+        st.session_state.trend_runtime = persisted
+        if len(persisted["trades"]) != len(original_trades):
+            persist_trades(persisted)
     runtime = st.session_state.trend_runtime
     trades = runtime["trades"]
     dt = now_ist()
