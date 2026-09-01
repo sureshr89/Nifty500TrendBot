@@ -434,6 +434,8 @@ def trend_check(state):
             if entry_made:
                 break
 
+    # Expose the already-fetched quote batch for display-only live P&L.
+    market["live_quotes"] = live_quotes
     persist_trades(runtime)
     return market, runtime["trades"]
 
@@ -517,6 +519,31 @@ st.caption("S2 BUY: Open between PDL & PDH → Low ≤ PDL − 0.15% → reclaim
 st.caption("S3 BUY: Open < PDL → reclaim PDL | S3 SELL: Open > PDH → break below PDH | S3 target = 1.25R\n\nS4 BUY: Open between PDL & PDH → break above PDH | S4 SELL: Open between PDL & PDH → break below PDL | S4 target = 1.25R")
 
 open_positions = [t for t in trades if t.get("status") == "OPEN"]
+
+# Portfolio metrics are display-only: they do not change any entry/exit logic.
+total_capital_used = 0.0
+total_live_pnl = 0.0
+for open_trade in open_positions:
+    qty = float(open_trade.get("quantity", 0) or 0)
+    entry = float(open_trade.get("entry_price", 0) or 0)
+    sid = open_trade.get("SecurityId")
+    total_capital_used += entry * qty
+    try:
+        live_q = market.get("live_quotes", {}).get(int(sid)) if isinstance(market.get("live_quotes"), dict) else None
+    except (TypeError, ValueError):
+        live_q = None
+    # Fallback to the trade's latest display price if a future state stores it.
+    live_ltp = float(live_q.get("ltp")) if live_q else float(open_trade.get("live_ltp", entry) or entry)
+    if open_trade.get("side") == "BUY":
+        total_live_pnl += (live_ltp - entry) * qty
+    else:
+        total_live_pnl += (entry - live_ltp) * qty
+
+p1, p2, p3 = st.columns(3)
+p1.metric("Open Positions", f"{len(open_positions)} / 4")
+p2.metric("Capital Used", f"₹{total_capital_used:,.2f}")
+p3.metric("Live P&L", f"₹{total_live_pnl:,.2f}")
+
 if open_positions:
     st.success(f"{len(open_positions)} OPEN POSITION(S) • Maximum 4")
     for open_trade in open_positions:
