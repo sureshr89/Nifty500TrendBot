@@ -22,7 +22,7 @@ REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 
-APP_BUILD = "mandatory-5index-basis-v5"
+APP_BUILD = "mandatory-5index-basis-v6-dhan-master-fix"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -135,22 +135,75 @@ class DhanLiveClient:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_dhan_broad_index_ids():
-    """Resolve required broad-market indices from Dhan's index security master."""
+    """Resolve required broad-market indices from Dhan's detailed security master.
+
+    Dhan's master labels index rows differently from equity rows, so matching is
+    performed across all available name columns instead of assuming EXCH_ID=NSE
+    and a particular SEGMENT spelling.
+    """
     master = pd.read_csv("https://images.dhan.co/api-data/api-scrip-master-detailed.csv", low_memory=False)
-    idx = master[master["EXCH_ID"].astype(str).str.upper().eq("NSE") & master["SEGMENT"].astype(str).str.upper().str.contains("IDX", na=False)].copy()
-    name_col = "DISPLAY_NAME" if "DISPLAY_NAME" in idx.columns else "UNDERLYING_SYMBOL"
-    names = idx[name_col].astype(str).str.upper().str.replace(r"\s+", " ", regex=True).str.strip()
-    aliases = {"Nifty 50":["NIFTY 50"],"Nifty Next 50":["NIFTY NEXT 50"],"Nifty Midcap 150":["NIFTY MIDCAP 150","NIFTY MIDCAP150"],"Nifty Smallcap 250":["NIFTY SMALLCAP 250","NIFTY SMALLCAP250"],"Nifty 500":["NIFTY 500"]}
+
+    def norm(x):
+        return (str(x).upper()
+                .replace("&", " AND ")
+                .replace("-", " ")
+                .replace("_", " ")
+                .replace("/", " ")
+                .strip())
+
+    name_cols = [x for x in [
+        "DISPLAY_NAME", "UNDERLYING_SYMBOL", "SEM_TRADING_SYMBOL",
+        "SM_SYMBOL_NAME", "SYMBOL_NAME"
+    ] if x in master.columns]
+    if not name_cols or "SECURITY_ID" not in master.columns:
+        raise RuntimeError("Dhan security master does not contain required index name/security-id columns")
+
+    aliases = {
+        "Nifty 50": ["NIFTY 50", "NIFTY"],
+        "Nifty Next 50": ["NIFTY NEXT 50", "NIFTY NEXT50"],
+        "Nifty Midcap 150": ["NIFTY MIDCAP 150", "NIFTY MIDCAP150"],
+        "Nifty Smallcap 250": ["NIFTY SMALLCAP 250", "NIFTY SMALLCAP250"],
+        "Nifty 500": ["NIFTY 500"],
+    }
+
+    # Build one normalized name per searchable column. Prefer rows explicitly
+    # marked as an index, but do not discard valid Dhan rows when the master
+    # uses a different exchange/segment label.
+    normalized = {col: master[col].map(norm) for col in name_cols}
     out = {}
     for label, choices in aliases.items():
         hit = None
         for choice in choices:
-            rows = idx[names.eq(choice)]
+            choice = norm(choice)
+            mask = pd.Series(False, index=master.index)
+            for col in name_cols:
+                mask = mask | normalized[col].eq(choice)
+            rows = master[mask]
             if len(rows):
+                # Prefer an index-like segment/exchange when duplicates exist.
+                if "SEGMENT" in rows.columns:
+                    idx_rows = rows[rows["SEGMENT"].astype(str).str.upper().isin(["I", "IDX", "INDEX", "NSE_IDX"])]
+                    if len(idx_rows):
+                        rows = idx_rows
                 hit = rows.iloc[0]
                 break
         if hit is None:
-            raise RuntimeError(f"Dhan index Security ID not found for {label}")
+            # Last-resort contains match for harmless spacing/master naming changes.
+            for choice in choices:
+                choice = norm(choice)
+                mask = pd.Series(False, index=master.index)
+                for col in name_cols:
+                    mask = mask | normalized[col].str.contains(choice, regex=False, na=False)
+                rows = master[mask]
+                if len(rows):
+                    if "SEGMENT" in rows.columns:
+                        idx_rows = rows[rows["SEGMENT"].astype(str).str.upper().isin(["I", "IDX", "INDEX", "NSE_IDX"])]
+                        if len(idx_rows):
+                            rows = idx_rows
+                    hit = rows.iloc[0]
+                    break
+        if hit is None:
+            raise RuntimeError(f"Dhan index Security ID not found for {label} in current Dhan security master")
         out[label] = int(hit["SECURITY_ID"])
     return out
 
