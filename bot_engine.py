@@ -104,28 +104,35 @@ def _history(client, security_id):
     return frame.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
 
 
-def _return(frame, days):
+def _return_from_pdc(frame, pdc, days):
+    """Return from a historical close to the previous completed day's close (PDC)."""
     latest_date = frame.iloc[-1]["date"]
     prior = frame[frame["date"] <= latest_date - pd.Timedelta(days=days)]
     if prior.empty:
         raise ValueError(f"Insufficient history for {days} days")
     base = float(prior.iloc[-1]["close"])
-    latest = float(frame.iloc[-1]["close"])
-    if base <= 0:
-        raise ValueError("Invalid historical close")
-    return (latest - base) / base * 100.0
+    if base <= 0 or pdc <= 0:
+        raise ValueError("Invalid historical close/PDC")
+    return (pdc - base) / base * 100.0
 
 
 def get_stock_trends(client, stock):
     frame = _history(client, stock["SecurityId"])
     if len(frame) < 2:
         raise ValueError("No Dhan daily history")
+
+    # The latest completed daily candle is PDC.  Use it as the stable
+    # reference for 1Y/6M/1M/1W so pre-market classification never depends
+    # on today's incomplete/live candle.
+    pdc = float(frame.iloc[-1]["close"])
+    previous_close = float(frame.iloc[-2]["close"])
     return {
-        "1Y Return %": _return(frame, 365),
-        "6M Return %": _return(frame, 182),
-        "1M Return %": _return(frame, 30),
-        "1W Return %": _return(frame, 7),
-        "1D Return %": ((float(frame.iloc[-1]["close"]) - float(frame.iloc[-2]["close"])) / float(frame.iloc[-2]["close"]) * 100.0),
+        "PDC": pdc,
+        "1Y Return %": _return_from_pdc(frame, pdc, 365),
+        "6M Return %": _return_from_pdc(frame, pdc, 182),
+        "1M Return %": _return_from_pdc(frame, pdc, 30),
+        "1W Return %": _return_from_pdc(frame, pdc, 7),
+        "1D Return %": ((pdc - previous_close) / previous_close * 100.0),
     }
 
 
