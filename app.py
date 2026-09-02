@@ -892,6 +892,8 @@ st.divider()
 st.subheader("📅 Today's Performance")
 
 # Always-visible summary first for quick mobile viewing
+s = stats(today_items)
+
 cards([
     ("Trades Taken",s["taken"]),("Open",s["open"]),("Closed",s["closed"]),
     ("Wins",s["wins"]),("Losses",s["losses"]),("Win %",f"{s['winpct']:.2f}%"),
