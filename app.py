@@ -919,12 +919,15 @@ with st.expander(f"📂 Show Today's Trade Details ({len(today_items)} trades)",
 st.divider()
 st.subheader("📂 All Trades & Cumulative Performance")
 st.markdown("**Cumulative Performance**")
-cs = stats(trades)
+# Cumulative cards show only the active finalized S1/S2 strategy history.
+# Old S1-S5 trades are preserved in storage but excluded from new-strategy performance.
+finalized_trades=[t for t in trades if t.get("strategy") in ("S1","S2")]
+cs = stats(finalized_trades)
 
 # Sector A/D analysis for every trade. Uses the A/D snapshot stored at entry,
 # so historical results remain reproducible after the live market changes.
 _sector_rows = []
-for _t in trades:
+for _t in finalized_trades:
     _ad = _t.get("sector_ad")
     try:
         _ad = float(_ad)
