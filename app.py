@@ -801,6 +801,10 @@ def trade_df(items):
             "Strategy":t.get("strategy","—"),"Side":t.get("side","—"),
             "Symbol":t.get("Symbol","—"),
             "Stock Name":t.get("Company") or t.get("Stock Name") or t.get("Symbol","—"),
+            "Sector":t.get("Sector","—"),
+            # Snapshot at entry: this is the exact Sector A/D that qualified
+            # and prioritized the trade, not a later live value.
+            "Sector A/D at Entry":t.get("sector_ad","—"),
             "Entry Time":t.get("entry_time","—"),"Entry":t.get("entry_price"),
             "Qty":t.get("quantity"),"Capital Used":capital(t),
             "SL":t.get("SL"),"Target":t.get("target"),
@@ -949,6 +953,42 @@ with st.expander(f"Show Complete Trade History ({len(trades)} trades)",expanded=
         st.dataframe(adf,use_container_width=True,hide_index=True)
 
 st.markdown("**Cumulative Performance**")
+# Sector A/D analysis for every trade. Uses the A/D snapshot stored at entry,
+# so historical results remain reproducible after the live market changes.
+_sector_rows = []
+for _t in trades:
+    _ad = _t.get("sector_ad")
+    try:
+        _ad = float(_ad)
+    except (TypeError, ValueError):
+        _ad = None
+    _sector_rows.append({
+        "Sector": _t.get("Sector","—"),
+        "Sector A/D at Entry": _ad,
+        "Trades": 1,
+        "P&L": pnl(_t),
+        "Status": _t.get("status","—"),
+    })
+if _sector_rows:
+    _sdf = pd.DataFrame(_sector_rows)
+    _summary = []
+    for _sector, _g in _sdf.groupby("Sector", dropna=False):
+        _valid_ad = pd.to_numeric(_g["Sector A/D at Entry"], errors="coerce").dropna()
+        _closed = _g[_g["Status"] == "CLOSED"]
+        _summary.append({
+            "Sector": _sector,
+            "Trades": len(_g),
+            "Closed": len(_closed),
+            "Open": int((_g["Status"] == "OPEN").sum()),
+            "Avg Sector A/D at Entry": _valid_ad.mean() if not _valid_ad.empty else None,
+            "Min Sector A/D at Entry": _valid_ad.min() if not _valid_ad.empty else None,
+            "Max Sector A/D at Entry": _valid_ad.max() if not _valid_ad.empty else None,
+            "Total P&L": _g["P&L"].sum(),
+        })
+    _sector_perf = pd.DataFrame(_summary).sort_values(["Total P&L","Trades"], ascending=[False,False])
+else:
+    _sector_perf = pd.DataFrame()
+
 cards([
     ("Total Trades",cs["taken"]),("Closed",cs["closed"]),("Open",cs["open"]),
     ("Wins",cs["wins"]),("Losses",cs["losses"]),("Overall Win %",f"{cs['winpct']:.2f}%"),
@@ -957,6 +997,19 @@ cards([
     ("Expectancy / Closed Trade",f"₹{cs['expectancy']:,.2f}"),("Max Profit",f"₹{cs['maxprofit']:,.2f}"),("Max Loss",f"₹{cs['maxloss']:,.2f}"),
     ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}")
 ],3)
+
+with st.expander("🏢 Traded Stocks — Sector A/D & Cumulative Sector Performance", expanded=False):
+    if adf.empty:
+        st.caption("No paper trades yet.")
+    else:
+        st.markdown("**Each trade — Sector A/D snapshot at entry**")
+        _trade_sector_cols = [x for x in ["Date","Strategy","Side","Symbol","Sector","Sector A/D at Entry","Status","P&L"] if x in adf.columns]
+        st.dataframe(adf[_trade_sector_cols], use_container_width=True, hide_index=True)
+        st.markdown("**Cumulative performance by sector**")
+        if _sector_perf.empty:
+            st.caption("No sector A/D snapshot available yet.")
+        else:
+            st.dataframe(_sector_perf, use_container_width=True, hide_index=True)
 
 # 5 BUY / SELL
 def show_set(title,rows,icon):
