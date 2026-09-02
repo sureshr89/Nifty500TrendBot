@@ -461,7 +461,13 @@ def trend_check(state):
     market_basis_status = "FULL BUY ALIGNMENT" if mode == "BUY" else ("FULL SELL ALIGNMENT" if mode == "SELL" else "NOT ALIGNED — NO NEW TRADES")
     # Coverage must be measured against UNIQUE official NIFTY 500 Security IDs.
     # universe_ids can also contain strategy rows, so never use its raw length.
-    coverage_ids = unique_universe_ids
+    # Coverage metrics must describe the official NIFTY 500 only. Strategy
+    # rows may contain duplicates and must never inflate the denominator above 500.
+    coverage_ids = sorted({
+        int(row.get("SecurityId"))
+        for row in universe_rows
+        if row.get("SecurityId") not in (None, "")
+    })
     dhan_ltp_valid = sum(
         1 for _sid in coverage_ids
         if (_sid in live_quotes and live_quotes[_sid].get("ltp") is not None and float(live_quotes[_sid].get("ltp") or 0) > 0)
