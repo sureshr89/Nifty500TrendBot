@@ -1021,19 +1021,6 @@ cards([
     ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}")
 ],3)
 
-with st.expander("🏢 Traded Stocks — Sector A/D & Cumulative Sector Performance", expanded=False):
-    if adf.empty:
-        st.caption("No paper trades yet.")
-    else:
-        st.markdown("**Each trade — Sector A/D snapshot at entry**")
-        _trade_sector_cols = [x for x in ["Date","Strategy","Side","Symbol","Sector","Sector A/D at Entry","Status","P&L"] if x in adf.columns]
-        st.dataframe(adf[_trade_sector_cols], use_container_width=True, hide_index=True)
-        st.markdown("**Cumulative performance by sector**")
-        if _sector_perf.empty:
-            st.caption("No sector A/D snapshot available yet.")
-        else:
-            st.dataframe(_sector_perf, use_container_width=True, hide_index=True)
-
 
 # 5 BUY / SELL
 def show_set(title,rows,icon):
