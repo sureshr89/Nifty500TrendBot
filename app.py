@@ -1093,6 +1093,8 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
 # rendered as multiple heavy tables in the Streamlit page.
 st.divider()
 with st.expander("📥 EOD / Full 360° Analysis Download",expanded=False):
+    # Build the export dataframe here from finalized S1/S2 history.
+    adf=trade_df(finalized_trades)
     if adf.empty:
         st.caption("No trade history yet. The complete Excel analysis will build automatically as trades are recorded.")
     else:
