@@ -2,7 +2,7 @@
 
 Pre-market BUY/SELL sets and PDH/PDL are read from the bot-state branch.
 When the Streamlit app is active, this app fetches fresh Dhan market data every
-15 seconds and evaluates the S1/S2/S3 paper-trading strategies.
+15 seconds and evaluates the finalized S1/S2 paper-trading strategies.
 """
 
 import math
@@ -593,7 +593,7 @@ def trend_check(state):
 
         MIN_RISK_PER_TRADE = 1000.0
         MAX_RISK_PER_TRADE = 1500.0
-        TARGET_R_MULTIPLE = 1.5  # Reward = 1.125 × initial risk (RR 1:1.125)
+        TARGET_R_MULTIPLE = 1.5  # Reward = 1.5 × initial risk (RR 1:1.5)
 
         def open_position(strategy, side, stock, sid, q, sl, target):
             entry = float(q["ltp"])
