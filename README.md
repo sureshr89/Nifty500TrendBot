@@ -1,6 +1,6 @@
 # NIFTY 500 Trend Bot
 
-Live Dhan monitoring with NIFTY 500 market breadth and S1 paper-trading strategies.
+Live Dhan monitoring with NIFTY 500 market breadth and a single S1 paper-trading strategy.
 
 ## Data and market universe
 
@@ -46,9 +46,9 @@ Result: **NO NEW TRADES**.
 
 The market basis is an entry filter only. Existing open positions are not force-exited when an index reverses; normal stop-loss, target and existing exit rules remain active.
 
-## Strategies
+## Strategy
 
-The bot maintains S1 paper-trading strategies and applies the configured stock, sector and market filters before allowing a new trade.
+The bot maintains a single S1 paper-trading strategy and applies the configured stock, sector and market filters before allowing a new trade.
 
 ## Position and risk controls
 
