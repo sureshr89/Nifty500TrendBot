@@ -965,14 +965,6 @@ cards([
     ("Max Capital Used",f"₹{s['maxcap']:,.2f}"),("Min Capital Used",f"₹{s['mincap']:,.2f}")
 ],3)
 
-# Currently trading stocks with their Sector A/D snapshot at entry.
-open_sector_items = [t for t in trades if t.get("status") == "OPEN"]
-if open_sector_items:
-    st.markdown("**📊 Currently Trading Stocks — Sector A/D Ratio**")
-    open_sector_df = trade_df(open_sector_items)
-    open_sector_cols = [x for x in ["Strategy","Side","Symbol","Sector","Sector A/D at Entry","Entry","SL","Target","Status","P&L"] if x in open_sector_df.columns]
-    st.dataframe(open_sector_df[open_sector_cols], use_container_width=True, hide_index=True)
-
 # Full trade details only when requested
 with st.expander(f"📂 Show Today's Trade Details ({len(today_items)} trades)",expanded=False):
     if tdf.empty:
