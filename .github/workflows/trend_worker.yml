@@ -3,7 +3,7 @@ name: NIFTY 500 Trend Worker
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * 1-5"
+    - cron: "10 3 * * 1-5"
 
 permissions:
   contents: write
@@ -23,6 +23,7 @@ jobs:
           git fetch origin bot-state || true
           git show origin/bot-state:scan_state.json > scan_state.json 2>/dev/null || true
           git show origin/bot-state:monthly_stock_ranking.csv > monthly_stock_ranking.csv 2>/dev/null || true
+          git show origin/bot-state:paper_trades.json > paper_trades.json 2>/dev/null || true
 
       - uses: actions/setup-python@v5
         with:
@@ -56,6 +57,9 @@ jobs:
           if [ -f monthly_stock_ranking.csv ]; then
             cp monthly_stock_ranking.csv /tmp/nifty500trend-state/monthly_stock_ranking.csv
           fi
+          if [ -f paper_trades.json ]; then
+            cp paper_trades.json /tmp/nifty500trend-state/paper_trades.json
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -66,8 +70,11 @@ jobs:
           if [ -f /tmp/nifty500trend-state/monthly_stock_ranking.csv ]; then
             cp /tmp/nifty500trend-state/monthly_stock_ranking.csv monthly_stock_ranking.csv
           fi
+          if [ -f /tmp/nifty500trend-state/paper_trades.json ]; then
+            cp /tmp/nifty500trend-state/paper_trades.json paper_trades.json
+          fi
 
-          git add scan_state.json monthly_stock_ranking.csv
+          git add scan_state.json monthly_stock_ranking.csv paper_trades.json
           git commit -m "Update trend worker state"
           git branch -M bot-state
           git push origin bot-state --force
