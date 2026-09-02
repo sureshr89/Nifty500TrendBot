@@ -297,6 +297,32 @@ def trend_check(state):
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
 
+    # Breadth must always use the independently mapped official NIFTY 500.
+    # Never inherit the smaller premarket classified/buy/sell state.
+    universe_rows = load_full_nifty500_universe()
+    # Prefer Dhan historical levels already prepared by the pre-market worker.
+    # NSE data is never used for live LTP, A/D, or trade execution.
+    range_by_sid = {}
+    for _row in state.get("classified", []) or []:
+        try:
+            _sid = int(_row.get("SecurityId"))
+            range_by_sid[_sid] = {
+                "PDH": _row.get("PDH", _row.get("pdh")),
+                "PDL": _row.get("PDL", _row.get("pdl")),
+                "PDC": _row.get("PDC", _row.get("pdc")),
+            }
+        except (TypeError, ValueError):
+            continue
+    for _row in universe_rows:
+        try:
+            _rng = range_by_sid.get(int(_row.get("SecurityId")))
+        except (TypeError, ValueError):
+            _rng = None
+        if _rng:
+            _row["PDH"] = _rng.get("PDH")
+            _row["PDL"] = _rng.get("PDL")
+            _row["PDC"] = _rng.get("PDC")
+
  # Quote eligibility must NOT depend on PDC.  A stock can still need a live
     # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
     universe_ids, pdc_by_id = [], {}
@@ -504,31 +530,6 @@ def trend_check(state):
                     _t["trend_1d"] = _trend1d_by_sid[_sid]
             except (TypeError, ValueError):
                 pass
-    # Breadth must always use the independently mapped official NIFTY 500.
-    # Never inherit the smaller premarket classified/buy/sell state.
-    universe_rows = load_full_nifty500_universe()
-    # Prefer Dhan historical levels already prepared by the pre-market worker.
-    # NSE data is never used for live LTP, A/D, or trade execution.
-    range_by_sid = {}
-    for _row in state.get("classified", []) or []:
-        try:
-            _sid = int(_row.get("SecurityId"))
-            range_by_sid[_sid] = {
-                "PDH": _row.get("PDH", _row.get("pdh")),
-                "PDL": _row.get("PDL", _row.get("pdl")),
-                "PDC": _row.get("PDC", _row.get("pdc")),
-            }
-        except (TypeError, ValueError):
-            continue
-    for _row in universe_rows:
-        try:
-            _rng = range_by_sid.get(int(_row.get("SecurityId")))
-        except (TypeError, ValueError):
-            _rng = None
-        if _rng:
-            _row["PDH"] = _rng.get("PDH")
-            _row["PDL"] = _rng.get("PDL")
-            _row["PDC"] = _rng.get("PDC")
 
    
     trades = runtime["trades"]
