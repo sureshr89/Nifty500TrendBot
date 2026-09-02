@@ -919,6 +919,8 @@ with st.expander(f"📂 Show Today's Trade Details ({len(today_items)} trades)",
 st.divider()
 st.subheader("📂 All Trades & Cumulative Performance")
 st.markdown("**Cumulative Performance**")
+cs = stats(trades)
+
 # Sector A/D analysis for every trade. Uses the A/D snapshot stored at entry,
 # so historical results remain reproducible after the live market changes.
 _sector_rows = []
