@@ -22,6 +22,7 @@ IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
+STRATEGY_STATE_VERSION = "S1S2_PDH_PDL_V2"
 
 APP_BUILD = "mandatory-5index-basis-v6-dhan-master-fix"
 
@@ -225,12 +226,14 @@ def load_persisted_trades():
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
     response = requests.get(_github_trade_state_url(), headers=headers, params={"ref": "bot-state"}, timeout=15)
     if response.status_code == 404:
-        return {"trades": [], "last_ltp": {}}
+        return {"trades": [], "last_ltp": {}, "strategy_version": STRATEGY_STATE_VERSION}
     response.raise_for_status()
     payload = response.json()
     raw = base64.b64decode(payload["content"]).decode("utf-8")
     data = json.loads(raw)
-    return {"trades": data.get("trades", []), "last_ltp": data.get("last_ltp", {}), "_sha": payload.get("sha")}
+    if data.get("strategy_version") != STRATEGY_STATE_VERSION:
+        return {"trades": [], "last_ltp": {}, "strategy_version": STRATEGY_STATE_VERSION, "_sha": payload.get("sha")}
+    return {"trades": data.get("trades", []), "last_ltp": data.get("last_ltp", {}), "strategy_version": STRATEGY_STATE_VERSION, "_sha": payload.get("sha")}
 
 def persist_trades(runtime):
     """Persist trades without allowing a stale/empty runtime to erase history."""
@@ -239,7 +242,7 @@ def persist_trades(runtime):
         return
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"}
     current = requests.get(_github_trade_state_url(), headers=headers, params={"ref": "bot-state"}, timeout=15)
-    sha, stored = None, {"trades": [], "last_ltp": {}}
+    sha, stored = None, {"trades": [], "last_ltp": {}, "strategy_version": STRATEGY_STATE_VERSION}
     if current.status_code == 200:
         payload = current.json()
         sha = payload.get("sha")
@@ -249,13 +252,23 @@ def persist_trades(runtime):
             return
     elif current.status_code != 404:
         current.raise_for_status()
-    incoming = runtime.get("trades", []) or []
-    existing = stored.get("trades", []) or []
+    if stored.get("strategy_version") != STRATEGY_STATE_VERSION:
+        existing = []
+    else:
+        existing = stored.get("trades", []) or []
+    if runtime.get("strategy_version") != STRATEGY_STATE_VERSION:
+        incoming = []
+        runtime["trades"] = []
+        runtime["last_ltp"] = {}
+        runtime["strategy_version"] = STRATEGY_STATE_VERSION
+    else:
+        incoming = runtime.get("trades", []) or []
     merged = {}
     for t in existing + incoming:
         key = str(t.get("id") or "|".join([str(t.get("symbol", "")), str(t.get("side", "")), str(t.get("strategy", "")), str(t.get("entry_time", t.get("entry_at", ""))), str(t.get("entry_price", ""))]))
         merged[key] = {**merged.get(key, {}), **t}
     data = {
+        "strategy_version": STRATEGY_STATE_VERSION,
         "trades": list(merged.values()),
         "last_ltp": {**(stored.get("last_ltp", {}) or {}), **(runtime.get("last_ltp", {}) or {})},
     }
@@ -502,14 +515,17 @@ def trend_check(state):
 
     if "trend_runtime" not in st.session_state:
         persisted = load_persisted_trades()
-        persisted = persisted if persisted is not None else {"trades": [], "last_ltp": {}}
-        original_trades = persisted.get("trades", [])
-        # Never automatically delete history during startup/refresh.
-        persisted["trades"] = original_trades
+        persisted = persisted if persisted is not None else {"trades": [], "last_ltp": {}, "strategy_version": STRATEGY_STATE_VERSION}
+        if persisted.get("strategy_version") != STRATEGY_STATE_VERSION:
+            persisted = {"trades": [], "last_ltp": {}, "strategy_version": STRATEGY_STATE_VERSION}
         st.session_state.trend_runtime = persisted
-        if len(persisted["trades"]) != len(original_trades):
-            persist_trades(persisted)
     runtime = st.session_state.trend_runtime
+    # Force any pre-finalized session runtime to start clean; prevents stale browser
+    # sessions from writing old S1-S4 trades back into the new S1/S2 history.
+    if runtime.get("strategy_version") != STRATEGY_STATE_VERSION:
+        runtime["trades"] = []
+        runtime["last_ltp"] = {}
+        runtime["strategy_version"] = STRATEGY_STATE_VERSION
     # Backfill older stored trades created before the 1D snapshot column was
     # added. Match by SecurityId so existing history can display the correct
     # pre-market 1D Return % when available.
