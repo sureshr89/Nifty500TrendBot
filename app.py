@@ -298,7 +298,7 @@ def clean_trade_history(trades):
             rr = reward / rps if rps > 0 else -1
             if (entry > 0 and qty > 0 and cap <= 150000.0 + 1e-6 and
                     1000.0 - 1e-6 <= risk <= 1500.0 + 1e-6 and
-                    abs(rr - 1.125) < 1e-6):
+                    abs(rr - 1.5) < 1e-6):
                 cleaned.append(t)
         except Exception:
             pass
