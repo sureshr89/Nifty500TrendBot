@@ -5,6 +5,7 @@ When the Streamlit app is active, this app fetches fresh Dhan market data every
 15 seconds and evaluates the S1/S2/S3 paper-trading strategies.
 """
 
+import math
 import json
 import time
 import base64
@@ -575,19 +576,26 @@ def trend_check(state):
             # Position size must satisfy BOTH the SL-risk band and the
             # maximum capital deployed per trade.
             MAX_CAPITAL_PER_TRADE = 150000.0
-            risk_qty = int(MAX_RISK_PER_TRADE // risk_per_share)
-            capital_qty = int(MAX_CAPITAL_PER_TRADE // entry)
-            quantity = min(risk_qty, capital_qty)
-            if quantity < 1:
+            # Find a whole-share quantity that simultaneously satisfies the
+            # mandatory ₹1,000–₹1,500 SL-risk band and the capital cap.
+            # Start at the minimum quantity required for ₹1,000 risk rather
+            # than rounding down from the ₹1,500 maximum.
+            min_risk_qty = math.ceil(MIN_RISK_PER_TRADE / risk_per_share)
+            max_risk_qty = math.floor(MAX_RISK_PER_TRADE / risk_per_share)
+            capital_qty = math.floor(MAX_CAPITAL_PER_TRADE / entry)
+            quantity = min(max_risk_qty, capital_qty)
+
+            if quantity < min_risk_qty or quantity < 1:
                 return False
+
             actual_risk = quantity * risk_per_share
             actual_capital = quantity * entry
 
-            # Reject trades that cannot satisfy all sizing rules. Never force
-            # a trade with risk below ₹1,000 just because the capital cap binds.
-            if (actual_risk < MIN_RISK_PER_TRADE or
-                    actual_risk > MAX_RISK_PER_TRADE or
-                    actual_capital > MAX_CAPITAL_PER_TRADE):
+            # Final hard safety check: absolutely no trade outside the risk
+            # band or capital limit may be stored.
+            if not (MIN_RISK_PER_TRADE <= actual_risk <= MAX_RISK_PER_TRADE):
+                return False
+            if actual_capital > MAX_CAPITAL_PER_TRADE:
                 return False
             trades.append({
                 "strategy": strategy, "side": side, "status": "OPEN",
