@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nifty500-bot-state
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
