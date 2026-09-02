@@ -1,8 +1,8 @@
-"""Active Streamlit dashboard and 15-second S1/S2 paper-trading worker.
+"""Active Streamlit dashboard and 15-second S1 paper-trading worker.
 
 Pre-market BUY/SELL sets and PDH/PDL are read from the bot-state branch.
 When the Streamlit app is active, this app fetches fresh Dhan market data every
-15 seconds and evaluates the finalized S1/S2 paper-trading strategies.
+15 seconds and evaluates the finalized S1 paper-trading strategy.
 """
 
 import math
@@ -22,7 +22,7 @@ IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
-STRATEGY_STATE_VERSION = "S1S2_PDH_PDL_V2"
+STRATEGY_STATE_VERSION = "S1_PDH_PDL_V3"
 
 APP_BUILD = "mandatory-5index-basis-v6-dhan-master-fix"
 
@@ -521,7 +521,7 @@ def trend_check(state):
         st.session_state.trend_runtime = persisted
     runtime = st.session_state.trend_runtime
     # Force any pre-finalized session runtime to start clean; prevents stale browser
-    # sessions from writing old S1-S4 trades back into the new S1/S2 history.
+    # sessions from writing old strategy trades back into the new S1 history.
     if runtime.get("strategy_version") != STRATEGY_STATE_VERSION:
         runtime["trades"] = []
         runtime["last_ltp"] = {}
@@ -581,11 +581,11 @@ def trend_check(state):
             })
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # New S1/S2 entries: maximum 4 positions total, one OPEN per strategy.
+    # New S1 entries: maximum 1 OPEN S1 position at a time.
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     # Never allow a new entry on incomplete breadth coverage.
     # This explicit check is kept here as a second safety gate even if mode logic changes.
-    if (len(open_trades) < 4 and in_entry_window(dt)
+    if (len(open_trades) < 1 and in_entry_window(dt)
             and breadth_valid and valid_count >= 480
             and mode in ("BUY", "SELL")):
         candidates = buy_rows if mode == "BUY" else sell_rows
@@ -688,21 +688,11 @@ def trend_check(state):
                 if s1 and "S1" not in open_strategies:
                     sl=pdl; risk=q["ltp"]-sl
                     if risk>0: entry_made=open_position("S1","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
-                if not entry_made:
-                    s2=q["open"]<pdl and prev_ltp is not None and prev_ltp<pdl and q["ltp"]>=pdl
-                    if s2 and "S2" not in open_strategies:
-                        sl=q["low"]; risk=q["ltp"]-sl
-                        if risk>0: entry_made=open_position("S2","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
             else:
                 s1=pdl<q["open"]<pdh and prev_ltp is not None and prev_ltp>pdl and q["ltp"]<=pdl
                 if s1 and "S1" not in open_strategies:
                     sl=pdh; risk=sl-q["ltp"]
                     if risk>0: entry_made=open_position("S1","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
-                if not entry_made:
-                    s2=q["open"]>pdh and prev_ltp is not None and prev_ltp>pdh and q["ltp"]<=pdh
-                    if s2 and "S2" not in open_strategies:
-                        sl=q["high"]; risk=sl-q["ltp"]
-                        if risk>0: entry_made=open_position("S2","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
 
             if entry_made:
                 break
@@ -745,7 +735,7 @@ div[data-testid="stExpander"] {border-radius:12px;}
 """,unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 / S2 paper strategies")
+st.caption("Live Dhan monitoring • S1 paper strategy")
 
 try:
     state=load_premarket_state()
@@ -901,12 +891,10 @@ with st.expander("📡 Dhan Live Coverage — 15 Second Snapshot", expanded=Fals
 
 # 2 STRATEGY REFERENCE - COLLAPSIBLE
 st.divider()
-with st.expander("🎯 S1 / S2 — Strategy Rules",expanded=False):
+with st.expander("🎯 S1 — Strategy Rules",expanded=False):
     rules=[
         ["S1","BUY","Existing window","Open between PDL/PDH → cross PDH","PDL","1.5R","SL / Target / existing square-off"],
         ["S1","SELL","Existing window","Open between PDL/PDH → cross PDL","PDH","1.5R","SL / Target / existing square-off"],
-        ["S2","BUY","Existing window","Open below PDL → reclaim PDL","Today's low before entry","1.5R","SL / Target / existing square-off"],
-        ["S2","SELL","Existing window","Open above PDH → break below PDH","Today's high before entry","1.5R","SL / Target / existing square-off"],
     ]
     st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Window","Exact Entry Condition","SL","Target","Exit"]),use_container_width=True,hide_index=True)
 
@@ -935,9 +923,9 @@ with st.expander(f"📂 Show Today's Trade Details ({len(today_items)} trades)",
 st.divider()
 st.subheader("📂 All Trades & Cumulative Performance")
 st.markdown("**Cumulative Performance**")
-# Cumulative cards show only the active finalized S1/S2 strategy history.
-# Old S1-S5 trades are preserved in storage but excluded from new-strategy performance.
-finalized_trades=[t for t in trades if t.get("strategy") in ("S1","S2")]
+# Cumulative cards show only the active finalized S1 strategy history.
+# All old strategy records are excluded from the active S1 performance.
+finalized_trades=[t for t in trades if t.get("strategy") == "S1"]
 cs = stats(finalized_trades)
 
 # Sector A/D analysis for every trade. Uses the A/D snapshot stored at entry,
@@ -1109,7 +1097,7 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
 # rendered as multiple heavy tables in the Streamlit page.
 st.divider()
 with st.expander("📥 EOD / Full 360° Analysis Download",expanded=False):
-    # Build the export dataframe here from finalized S1/S2 history.
+    # Build the export dataframe here from finalized S1 history.
     adf=trade_df(finalized_trades)
     if adf.empty:
         st.caption("No trade history yet. The complete Excel analysis will build automatically as trades are recorded.")
