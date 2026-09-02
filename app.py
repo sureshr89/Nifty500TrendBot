@@ -805,6 +805,9 @@ def trade_df(items):
             # Snapshot at entry: this is the exact Sector A/D that qualified
             # and prioritized the trade, not a later live value.
             "Sector A/D at Entry":t.get("sector_ad","—"),
+            # 1D trend snapshot: latest completed PDC versus the previous
+            # completed PDC. Reference only; it does not change trade entry.
+            "1D % at Entry":t.get("1D %", t.get("trend_1d", "—")),
             "Entry Time":t.get("entry_time","—"),"Entry":t.get("entry_price"),
             "Qty":t.get("quantity"),"Capital Used":capital(t),
             "SL":t.get("SL"),"Target":t.get("target"),
