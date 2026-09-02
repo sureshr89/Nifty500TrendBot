@@ -1,4 +1,4 @@
-"""Active Streamlit dashboard and 15-second S1/S2/S3/S4 paper-trading worker.
+"""Active Streamlit dashboard and 15-second S1/S2 paper-trading worker.
 
 Pre-market BUY/SELL sets and PDH/PDL are read from the bot-state branch.
 When the Streamlit app is active, this app fetches fresh Dhan market data every
@@ -565,7 +565,7 @@ def trend_check(state):
             })
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # New S1/S2/S3/S4 entries: maximum 4 positions total, one OPEN per strategy.
+    # New S1/S2 entries: maximum 4 positions total, one OPEN per strategy.
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     # Never allow a new entry on incomplete breadth coverage.
     # This explicit check is kept here as a second safety gate even if mode logic changes.
@@ -593,7 +593,7 @@ def trend_check(state):
 
         MIN_RISK_PER_TRADE = 1000.0
         MAX_RISK_PER_TRADE = 1500.0
-        TARGET_R_MULTIPLE = 1.125  # Reward = 1.125 × initial risk (RR 1:1.125)
+        TARGET_R_MULTIPLE = 1.5  # Reward = 1.125 × initial risk (RR 1:1.125)
 
         def open_position(strategy, side, stock, sid, q, sl, target):
             entry = float(q["ltp"])
@@ -668,85 +668,30 @@ def trend_check(state):
             open_strategies = {t["strategy"] for t in trades if t["status"] == "OPEN"}
 
             if mode == "BUY":
-                # S1: Open > PDH, low 0.15% below PDH, reclaim PDH.
-                s1 = q["open"] > pdh and q["low"] <= pdh * 0.9985 and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
+                s1 = pdl < q["open"] < pdh and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
                 if s1 and "S1" not in open_strategies:
-                    sl = (pdh + pdl) / 2
-                    risk = q["ltp"] - sl
-                    if risk > 0:
-                        entry_made = open_position("S1", "BUY", stock, sid, q, sl, q["ltp"] + TARGET_R_MULTIPLE * risk)
-
-                # S2: Open between PDL/PDH, low 0.15% below PDL, reclaim PDL.
+                    sl=pdl; risk=q["ltp"]-sl
+                    if risk>0: entry_made=open_position("S1","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
                 if not entry_made:
-                    s2 = pdl < q["open"] < pdh and q["low"] <= pdl * 0.9985 and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
+                    s2=q["open"]<pdl and prev_ltp is not None and prev_ltp<pdl and q["ltp"]>=pdl
                     if s2 and "S2" not in open_strategies:
-                        sl = pdl - ((pdh - pdl) / 2)
-                        risk = q["ltp"] - sl
-                        if risk > 0:
-                            entry_made = open_position("S2", "BUY", stock, sid, q, sl, q["ltp"] + TARGET_R_MULTIPLE * risk)
-
-                # S3: Open < PDL and reclaim PDL; SL = today's low; target = 1.125R.
-                if not entry_made:
-                    s3 = q["open"] < pdl and prev_ltp is not None and prev_ltp < pdl and q["ltp"] >= pdl
-                    if s3 and "S3" not in open_strategies:
-                        sl = q["low"]
-                        risk = q["ltp"] - sl
-                        if risk > 0:
-                            entry_made = open_position("S3", "BUY", stock, sid, q, sl, q["ltp"] + TARGET_R_MULTIPLE * risk)
-
-                    # S4 BUY: open inside previous-day range, then break above PDH.
-                    if not entry_made and "S4" not in open_strategies:
-                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
-                        if s4:
-                            sl = (pdh + pdl) / 2
-                            risk = q["ltp"] - sl
-                            if risk > 0:
-                                entry_made = open_position("S4", "BUY", stock, sid, q, sl, q["ltp"] + TARGET_R_MULTIPLE * risk)
+                        sl=q["low"]; risk=q["ltp"]-sl
+                        if risk>0: entry_made=open_position("S2","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
             else:
-                # S1: Open < PDL, high 0.15% above PDL, break below PDL.
-                s1 = q["open"] < pdl and q["high"] >= pdl * 1.0015 and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
+                s1=pdl<q["open"]<pdh and prev_ltp is not None and prev_ltp>pdl and q["ltp"]<=pdl
                 if s1 and "S1" not in open_strategies:
-                    sl = (pdh + pdl) / 2
-                    risk = sl - q["ltp"]
-                    if risk > 0:
-                        entry_made = open_position("S1", "SELL", stock, sid, q, sl, q["ltp"] - TARGET_R_MULTIPLE * risk)
-
-                # S2: Open between PDL/PDH, high 0.15% above PDH, break below PDH.
+                    sl=pdh; risk=sl-q["ltp"]
+                    if risk>0: entry_made=open_position("S1","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
                 if not entry_made:
-                    s2 = pdl < q["open"] < pdh and q["high"] >= pdh * 1.0015 and prev_ltp is not None and prev_ltp > pdh and q["ltp"] <= pdh
+                    s2=q["open"]>pdh and prev_ltp is not None and prev_ltp>pdh and q["ltp"]<=pdh
                     if s2 and "S2" not in open_strategies:
-                        sl = pdh + ((pdh - pdl) / 2)
-                        risk = sl - q["ltp"]
-                        if risk > 0:
-                            entry_made = open_position("S2", "SELL", stock, sid, q, sl, q["ltp"] - TARGET_R_MULTIPLE * risk)
+                        sl=q["high"]; risk=sl-q["ltp"]
+                        if risk>0: entry_made=open_position("S2","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
 
-                # S3: Open > PDH and break below PDH; SL = today's high; target = 1.125R.
-                if not entry_made:
-                    s3 = q["open"] > pdh and prev_ltp is not None and prev_ltp > pdh and q["ltp"] <= pdh
-                    if s3 and "S3" not in open_strategies:
-                        sl = q["high"]
-                        risk = sl - q["ltp"]
-                        if risk > 0:
-                            entry_made = open_position("S3", "SELL", stock, sid, q, sl, q["ltp"] - TARGET_R_MULTIPLE * risk)
-
-                    # S4 SELL: open inside previous-day range, then break below PDL.
-                    if not entry_made and "S4" not in open_strategies:
-                        s4 = q["open"] > pdl and q["open"] < pdh and prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
-                        if s4:
-                            sl = (pdh + pdl) / 2
-                            risk = sl - q["ltp"]
-                            if risk > 0:
-                                entry_made = open_position("S4", "SELL", stock, sid, q, sl, q["ltp"] - TARGET_R_MULTIPLE * risk)
-
-            runtime["last_ltp"][str(sid)] = q["ltp"]
             if entry_made:
                 break
+            runtime["last_ltp"][str(sid)] = q["ltp"]
 
-    # Expose the already-fetched quote batch for display-only live P&L.
-    # Preserve the complete single-scan snapshot for downstream dashboard views.
-    market["live_quotes"] = live_quotes
-    market["resolved_pdc"] = resolved_pdc
-    market["breadth_universe_rows"] = universe_rows
     # PDH/PDL come from the existing premarket scan sets. Attach them by
     # SecurityId to the independent 500-stock breadth rows without another scan.
     range_by_id = {}
@@ -784,7 +729,7 @@ div[data-testid="stExpander"] {border-radius:12px;}
 """,unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 / S2 / S3 / S4 paper strategies")
+st.caption("Live Dhan monitoring • S1 / S2 paper strategies")
 
 try:
     state=load_premarket_state()
@@ -933,25 +878,14 @@ with st.expander("📡 Dhan Live Coverage — 15 Second Snapshot", expanded=Fals
 
 # 2 STRATEGY REFERENCE - COLLAPSIBLE
 st.divider()
-with st.expander("🎯 S1 / S2 / S3 / S4 — Strategy Rules",expanded=False):
+with st.expander("🎯 S1 / S2 — Strategy Rules",expanded=False):
     rules=[
-    ["S1","BUY","09:30–13:00","Open > PDH → low ≤ PDH×0.9985 → reclaim PDH","(PDH+PDL)/2","1.125R","SL / Target / 14:55"],
-    ["S1","SELL","09:30–13:00","Open < PDL → high ≥ PDL×1.0015 → break PDL","(PDH+PDL)/2","1.125R","SL / Target / 14:55"],
-    ["S2","BUY","09:30–13:00","Open inside range → low ≤ PDL×0.9985 → reclaim PDL","PDL−(PDH−PDL)/2","1.125R","SL / Target / 14:55"],
-    ["S2","SELL","09:30–13:00","Open inside range → high ≥ PDH×1.0015 → break PDH","PDH+(PDH−PDL)/2","1.125R","SL / Target / 14:55"],
-    ["S3","BUY","09:30–13:00","Open < PDL → previous LTP < PDL → reclaim PDL","Today's Low","1.125R","SL / Target / 14:55"],
-    ["S3","SELL","09:30–13:00","Open > PDH → previous LTP > PDH → break below PDH","Today's High","1.125R","SL / Target / 14:55"],
-    ["S4","BUY","09:30–13:00","Open inside range → previous LTP < PDH → cross PDH","(PDH+PDL)/2","1.125R","SL / Target / 14:55"],
-    ["S4","SELL","09:30–13:00","Open inside range → previous LTP > PDL → cross PDL","(PDH+PDL)/2","1.125R","SL / Target / 14:55"]]
+        ["S1","BUY","Existing window","Open between PDL/PDH → cross PDH","PDL","1.5R","SL / Target / existing square-off"],
+        ["S1","SELL","Existing window","Open between PDL/PDH → cross PDL","PDH","1.5R","SL / Target / existing square-off"],
+        ["S2","BUY","Existing window","Open below PDL → reclaim PDL","Today's low before entry","1.5R","SL / Target / existing square-off"],
+        ["S2","SELL","Existing window","Open above PDH → break below PDH","Today's high before entry","1.5R","SL / Target / existing square-off"],
+    ]
     st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Window","Exact Entry Condition","SL","Target","Exit"]),use_container_width=True,hide_index=True)
-
-# DATA
-today=now_ist().strftime("%Y-%m-%d")
-today_items=[t for t in trades if str(t.get("entry_time","")).startswith(today)]
-tdf=trade_df(today_items)
-adf=trade_df(trades)
-s=stats(today_items)
-cs=stats(trades)
 
 # 3 TODAY PERFORMANCE — SUMMARY FIRST, TRADE TABLE SEPARATE COLLAPSE
 st.divider()
