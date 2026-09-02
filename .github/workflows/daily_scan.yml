@@ -37,6 +37,29 @@ jobs:
       - name: Run NIFTY 500 scan
         run: python run_scan.py
 
+      - name: Validate generated scan state
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          state = json.loads(Path("scan_state.json").read_text(encoding="utf-8"))
+          required = {"Nifty 50", "Nifty Next 50", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 500"}
+          market = state.get("market") or {}
+          health = state.get("health") or {}
+          breadth = state.get("breadth_universe") or []
+          strategy_coverage = int(health.get("strategy_coverage", len(state.get("classified") or [])) or 0)
+
+          if len(breadth) != 500:
+              raise SystemExit(f"Invalid breadth universe: expected 500, got {len(breadth)}")
+          if set(market) != required:
+              missing = sorted(required - set(market))
+              extra = sorted(set(market) - required)
+              raise SystemExit(f"Invalid market basis; missing={missing}, extra={extra}")
+          if health.get("status") == "LOW_COVERAGE" or strategy_coverage < 480:
+              raise SystemExit(f"Refusing to publish low-coverage scan: strategy_coverage={strategy_coverage}")
+          PY
+
       - name: Publish scan state
         run: |
           git config user.name "github-actions[bot]"
