@@ -745,8 +745,6 @@ sell_rows=state.get("sell_set",[])
 mode=market.get("mode","NEUTRAL")
 
 # Dashboard datasets used by Today and cumulative performance sections
-today_key=datetime.now(IST).strftime("%Y-%m-%d")
-today_items=[t for t in trades if str(t.get("entry_time","")).startswith(today_key)]
 tdf=trade_df(today_items) if "trade_df" in globals() else pd.DataFrame()
 
 def pnl(t):
@@ -834,6 +832,10 @@ def stats(items):
         "profitfactor":(sum(x for x in cp if x>0)/abs(sum(x for x in cp if x<0))) if sum(x for x in cp if x<0)!=0 else 0,
         "expectancy":sum(cp)/len(cp) if cp else 0
     }
+
+today_key=datetime.now(IST).strftime("%Y-%m-%d")
+today_items=[t for t in trades if str(t.get("entry_time","")).startswith(today_key)]
+tdf=trade_df(today_items)
 
 def cards(pairs, cols=3):
     # HTML/CSS grid is used instead of st.columns because Streamlit stacks
