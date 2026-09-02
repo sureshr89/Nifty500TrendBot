@@ -271,10 +271,15 @@ def clean_trade_history(trades):
         try:
             entry = float(t.get("entry_price", 0) or 0)
             qty = float(t.get("quantity", 0) or 0)
-            rps = abs(float(t.get("risk_per_share", 0) or 0))
+            sl = float(t.get("SL"))
+            # Recompute risk from the authoritative entry and SL instead of
+            # trusting a potentially stale stored risk_per_share value.
+            side = str(t.get("side", "")).upper()
+            rps = (entry - sl) if side == "BUY" else (sl - entry)
+            if rps <= 0:
+                continue
             cap = entry * qty
             risk = rps * qty
-            sl = float(t.get("SL"))
             target = float(t.get("target"))
             reward = (target - entry) if t.get("side") == "BUY" else (entry - target)
             rr = reward / rps if rps > 0 else -1
