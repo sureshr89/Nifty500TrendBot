@@ -121,12 +121,12 @@ def _return_from_pdc(frame, pdc, days):
     return (pdc - base) / base * 100.0
 
 
-def get_stock_trends(client, stock):
-    frame = _history(client, stock["SecurityId"])
+def get_stock_trends_from_history(frame):
+    """Calculate all trend metrics from one completed Dhan history frame."""
     if len(frame) < 2:
         raise ValueError("No Dhan daily history")
 
-    # The latest completed daily candle is PDC.  Use it as the stable
+    # The latest completed daily candle is PDC. Use it as the stable
     # reference for 1Y/6M/1M/1W so pre-market classification never depends
     # on today's incomplete/live candle.
     pdc = float(frame.iloc[-1]["close"])
@@ -139,6 +139,11 @@ def get_stock_trends(client, stock):
         "1W Return %": _return_from_pdc(frame, pdc, 7),
         "1D Return %": ((pdc - previous_close) / previous_close * 100.0),
     }
+
+
+def get_stock_trends(client, stock):
+    frame = _history(client, stock["SecurityId"])
+    return get_stock_trends_from_history(frame)
 
 
 def calculate_advance_decline(frame):
@@ -238,14 +243,22 @@ def fetch_equity_ohlc(client, security_ids):
     return result
 
 
-def add_s1_levels(frame):
-    """Attach PDH/PDL/PDC from Dhan historical data without shrinking the universe."""
+def add_s1_levels(frame, history_by_sid=None):
+    """Attach PDH/PDL/PDC without shrinking the universe.
+
+    Reuse the historical frame already fetched during trend classification so
+    the pre-market scan does not make a second historical API call per stock.
+    """
     out = frame.copy()
-    client = DhanClient()
+    client = None if history_by_sid is not None else DhanClient()
     ranges = {}
+    history_by_sid = history_by_sid or {}
     for _, stock in out.iterrows():
         try:
-            hist = _history(client, stock["SecurityId"])
+            sid = int(stock["SecurityId"])
+            hist = history_by_sid.get(sid)
+            if hist is None:
+                hist = _history(client, sid)
             if len(hist) >= 1:
                 # _history already excludes today's incomplete candle, so the
                 # latest row is exactly the previous completed trading day.
@@ -270,11 +283,15 @@ def scan_nifty500():
     universe = universe.drop_duplicates(subset=["SecurityId"]).copy()
     if len(universe) != 500:
         raise RuntimeError(f"NIFTY 500 universe must contain 500 unique Security IDs; got {len(universe)}")
-    rows, errors = [], []
+    rows, errors, history_by_sid = [], [], {}
 
     for _, stock in universe.iterrows():
         try:
-            rows.append({**stock.to_dict(), **get_stock_trends(client, stock)})
+            sid = int(stock["SecurityId"])
+            hist = _history(client, sid)
+            trends = get_stock_trends_from_history(hist)
+            history_by_sid[sid] = hist
+            rows.append({**stock.to_dict(), **trends})
         except Exception as exc:
             errors.append(f"{stock['Symbol']}: {exc}")
 
@@ -282,7 +299,7 @@ def scan_nifty500():
         raise RuntimeError("No stock trends could be calculated")
 
     frame = pd.DataFrame(rows)
-    frame = add_s1_levels(frame)
+    frame = add_s1_levels(frame, history_by_sid)
     # A stock can be in breadth but must have complete Dhan historical levels
     # before it is eligible for any strategy set.
     strategy_frame = frame.dropna(subset=["PDH", "PDL", "PDC"]).copy()
