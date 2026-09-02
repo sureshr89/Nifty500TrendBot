@@ -98,10 +98,15 @@ def _history(client, security_id):
     })
     if frame.empty:
         return frame
-    frame["date"] = pd.to_datetime(frame["timestamp"], unit="s", errors="coerce")
+    # Convert timestamps to IST dates and keep only completed trading days.
+    # This prevents an in-progress today's candle from being mistaken for PDC.
+    frame["date"] = pd.to_datetime(frame["timestamp"], unit="s", utc=True, errors="coerce").dt.tz_convert(IST).dt.normalize().dt.tz_localize(None)
     for col in ("open", "high", "low", "close"):
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    return frame.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    frame = frame.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    today_ist = datetime.now(IST).date()
+    frame = frame[frame["date"].dt.date < today_ist].copy()
+    return frame.reset_index(drop=True)
 
 
 def _return_from_pdc(frame, pdc, days):
@@ -241,8 +246,10 @@ def add_s1_levels(frame):
     for _, stock in out.iterrows():
         try:
             hist = _history(client, stock["SecurityId"])
-            if len(hist) >= 2:
-                prev = hist.iloc[-2]
+            if len(hist) >= 1:
+                # _history already excludes today's incomplete candle, so the
+                # latest row is exactly the previous completed trading day.
+                prev = hist.iloc[-1]
                 ranges[int(stock["SecurityId"])] = {
                     "PDH": float(prev["high"]),
                     "PDL": float(prev["low"]),
