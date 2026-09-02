@@ -297,53 +297,7 @@ def trend_check(state):
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
 
-    # Backfill older stored trades created before the 1D snapshot column was
-    # added. Match by SecurityId so existing history can display the correct
-    # pre-market 1D Return % when available.
-    _trend1d_by_sid = {}
-    for _r in state.get("classified", []) or []:
-        try:
-            _sid = int(_r.get("SecurityId"))
-            _v = _r.get("1D Return %", _r.get("trend_1d"))
-            if _v is not None:
-                _trend1d_by_sid[_sid] = _v
-        except (TypeError, ValueError):
-            continue
-    for _t in runtime.get("trades", []) or []:
-        if _t.get("trend_1d") is None:
-            try:
-                _sid = int(_t.get("SecurityId"))
-                if _sid in _trend1d_by_sid:
-                    _t["trend_1d"] = _trend1d_by_sid[_sid]
-            except (TypeError, ValueError):
-                pass
-    # Breadth must always use the independently mapped official NIFTY 500.
-    # Never inherit the smaller premarket classified/buy/sell state.
-    universe_rows = load_full_nifty500_universe()
-    # Prefer Dhan historical levels already prepared by the pre-market worker.
-    # NSE data is never used for live LTP, A/D, or trade execution.
-    range_by_sid = {}
-    for _row in state.get("classified", []) or []:
-        try:
-            _sid = int(_row.get("SecurityId"))
-            range_by_sid[_sid] = {
-                "PDH": _row.get("PDH", _row.get("pdh")),
-                "PDL": _row.get("PDL", _row.get("pdl")),
-                "PDC": _row.get("PDC", _row.get("pdc")),
-            }
-        except (TypeError, ValueError):
-            continue
-    for _row in universe_rows:
-        try:
-            _rng = range_by_sid.get(int(_row.get("SecurityId")))
-        except (TypeError, ValueError):
-            _rng = None
-        if _rng:
-            _row["PDH"] = _rng.get("PDH")
-            _row["PDL"] = _rng.get("PDL")
-            _row["PDC"] = _rng.get("PDC")
-
-    # Quote eligibility must NOT depend on PDC.  A stock can still need a live
+ # Quote eligibility must NOT depend on PDC.  A stock can still need a live
     # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
     universe_ids, pdc_by_id = [], {}
     for row in universe_rows:
@@ -530,6 +484,53 @@ def trend_check(state):
         if len(persisted["trades"]) != len(original_trades):
             persist_trades(persisted)
     runtime = st.session_state.trend_runtime
+    # Backfill older stored trades created before the 1D snapshot column was
+    # added. Match by SecurityId so existing history can display the correct
+    # pre-market 1D Return % when available.
+    _trend1d_by_sid = {}
+    for _r in state.get("classified", []) or []:
+        try:
+            _sid = int(_r.get("SecurityId"))
+            _v = _r.get("1D Return %", _r.get("trend_1d"))
+            if _v is not None:
+                _trend1d_by_sid[_sid] = _v
+        except (TypeError, ValueError):
+            continue
+    for _t in runtime.get("trades", []) or []:
+        if _t.get("trend_1d") is None:
+            try:
+                _sid = int(_t.get("SecurityId"))
+                if _sid in _trend1d_by_sid:
+                    _t["trend_1d"] = _trend1d_by_sid[_sid]
+            except (TypeError, ValueError):
+                pass
+    # Breadth must always use the independently mapped official NIFTY 500.
+    # Never inherit the smaller premarket classified/buy/sell state.
+    universe_rows = load_full_nifty500_universe()
+    # Prefer Dhan historical levels already prepared by the pre-market worker.
+    # NSE data is never used for live LTP, A/D, or trade execution.
+    range_by_sid = {}
+    for _row in state.get("classified", []) or []:
+        try:
+            _sid = int(_row.get("SecurityId"))
+            range_by_sid[_sid] = {
+                "PDH": _row.get("PDH", _row.get("pdh")),
+                "PDL": _row.get("PDL", _row.get("pdl")),
+                "PDC": _row.get("PDC", _row.get("pdc")),
+            }
+        except (TypeError, ValueError):
+            continue
+    for _row in universe_rows:
+        try:
+            _rng = range_by_sid.get(int(_row.get("SecurityId")))
+        except (TypeError, ValueError):
+            _rng = None
+        if _rng:
+            _row["PDH"] = _rng.get("PDH")
+            _row["PDL"] = _rng.get("PDL")
+            _row["PDC"] = _rng.get("PDC")
+
+   
     trades = runtime["trades"]
     dt = now_ist()
     open_trades = [t for t in trades if t["status"] == "OPEN"]
