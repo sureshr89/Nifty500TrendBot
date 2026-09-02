@@ -21,15 +21,21 @@ def main():
     # Versioned state contract consumed by the Trend Worker.  Keep these
     # validation keys at the top level so a malformed/partial scan is rejected
     # safely instead of being treated as a tradable state.
+    # Keep breadth membership coverage separate from successful strategy-scan
+    # coverage. The breadth universe is intentionally fixed at 500 members,
+    # while classified coverage shows how many stocks actually completed all
+    # required historical calculations and received usable strategy levels.
     coverage = len(universe_rows)
-    health_status = "OK" if coverage >= 480 and not errors else (
-        "DEGRADED" if coverage >= 480 else "LOW_COVERAGE"
+    strategy_coverage = len(classified_rows)
+    health_status = "OK" if strategy_coverage >= 480 and not errors else (
+        "DEGRADED" if strategy_coverage >= 480 else "LOW_COVERAGE"
     )
     state = {
         "state_schema_version": 1,
         "health": {
             "status": health_status,
             "coverage": coverage,
+            "strategy_coverage": strategy_coverage,
             "minimum_coverage": 480,
             "errors": errors,
             "generated_at": result["generated_at"],
@@ -44,7 +50,7 @@ def main():
     }
     path = Path("scan_state.json")
     path.write_text(json.dumps(state, ensure_ascii=False, separators=(",", ":"), allow_nan=False), encoding="utf-8")
-    print(f"Scan complete: universe={len(state['breadth_universe'])}, classified={len(state['classified'])}, buy={len(state['buy_set'])}, sell={len(state['sell_set'])}, errors={len(state['errors'])}")
+    print(f"Scan complete: universe={len(state['breadth_universe'])}, classified={len(state['classified'])}, buy={len(state['buy_set'])}, sell={len(state['sell_set'])}, errors={len(state['errors'])}, health={health_status}")
 
 
 if __name__ == "__main__":
