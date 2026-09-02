@@ -581,11 +581,15 @@ def trend_check(state):
             })
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # New S1 entries: maximum 1 OPEN S1 position at a time.
+    # New S1 entries: maximum 4 OPEN positions at any one time.
+    # There is intentionally no whole-day trade-count cap; when an open trade
+    # closes, another valid S1 opportunity may be taken while the entry window
+    # and all market/breadth safeguards remain satisfied.
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     # Never allow a new entry on incomplete breadth coverage.
     # This explicit check is kept here as a second safety gate even if mode logic changes.
-    if (len(open_trades) < 1 and in_entry_window(dt)
+    MAX_OPEN_TRADES = 4
+    if (len(open_trades) < MAX_OPEN_TRADES and in_entry_window(dt)
             and breadth_valid and valid_count >= 480
             and mode in ("BUY", "SELL")):
         candidates = buy_rows if mode == "BUY" else sell_rows
@@ -681,16 +685,23 @@ def trend_check(state):
                 runtime["last_ltp"][str(sid)] = q["ltp"]
                 continue
             entry_made = False
-            open_strategies = {t["strategy"] for t in trades if t["status"] == "OPEN"}
+            open_symbols = {
+                str(t.get("Symbol", "")).upper()
+                for t in trades
+                if t.get("status") == "OPEN"
+            }
+            if str(stock.get("Symbol", "")).upper() in open_symbols:
+                runtime["last_ltp"][str(sid)] = q["ltp"]
+                continue
 
             if mode == "BUY":
                 s1 = pdl < q["open"] < pdh and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
-                if s1 and "S1" not in open_strategies:
+                if s1:
                     sl=pdl; risk=q["ltp"]-sl
                     if risk>0: entry_made=open_position("S1","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
             else:
                 s1=pdl<q["open"]<pdh and prev_ltp is not None and prev_ltp>pdl and q["ltp"]<=pdl
-                if s1 and "S1" not in open_strategies:
+                if s1:
                     sl=pdh; risk=sl-q["ltp"]
                     if risk>0: entry_made=open_position("S1","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
 
