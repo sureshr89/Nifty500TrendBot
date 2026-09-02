@@ -972,26 +972,6 @@ with st.expander(f"📂 Show Today's Trade Details ({len(today_items)} trades)",
     else:
         st.dataframe(tdf,use_container_width=True,hide_index=True)
 
-# 4 ALL TRADES + CUMULATIVE CARDS
-st.divider()
-st.subheader("📂 All Trades & Cumulative Performance")
-with st.expander(f"Show Complete Trade History ({len(trades)} trades)",expanded=False):
-    if adf.empty:
-        st.caption("No paper trades yet.")
-    else:
-        st.dataframe(adf,use_container_width=True,hide_index=True)
-
-st.markdown("**Cumulative Performance**")
-cards([
-    ("Total Trades",cs["taken"]),("Closed",cs["closed"]),("Open",cs["open"]),
-    ("Wins",cs["wins"]),("Losses",cs["losses"]),("Overall Win %",f"{cs['winpct']:.2f}%"),
-    ("Realized P&L",f"₹{cs['realized']:,.2f}"),("Live P&L",f"₹{cs['live']:,.2f}"),("Total P&L",f"₹{cs['realized']+cs['live']:,.2f}"),
-    ("Average Win",f"₹{cs['avgwin']:,.2f}"),("Average Loss",f"₹{cs['avgloss']:,.2f}"),("Profit Factor",f"{cs['profitfactor']:.2f}"),
-    ("Expectancy / Closed Trade",f"₹{cs['expectancy']:,.2f}"),("Max Profit",f"₹{cs['maxprofit']:,.2f}"),("Max Loss",f"₹{cs['maxloss']:,.2f}"),
-    ("Gross Profit",f"₹{cs['grossprofit']:,.2f}"),("Gross Loss",f"₹{cs['grossloss']:,.2f}")
-],3)
-
-
 # 5 BUY / SELL
 def show_set(title,rows,icon):
     with st.expander(f"{icon} {title} ({len(rows)})",expanded=False):
@@ -1180,9 +1160,32 @@ with st.expander("📥 EOD / Full 360° Analysis Download",expanded=False):
                  Avg_Return_pct=("Return %","mean")).reset_index())
 
         import io
+        # Exact same cumulative metrics that were previously displayed on the
+        # dashboard are preserved in the downloadable workbook.
+        cumulative_df = pd.DataFrame([{
+            "Total Trades": cs["taken"],
+            "Closed": cs["closed"],
+            "Open": cs["open"],
+            "Wins": cs["wins"],
+            "Losses": cs["losses"],
+            "Overall Win %": cs["winpct"],
+            "Realized P&L": cs["realized"],
+            "Live P&L": cs["live"],
+            "Total P&L": cs["realized"] + cs["live"],
+            "Average Win": cs["avgwin"],
+            "Average Loss": cs["avgloss"],
+            "Profit Factor": cs["profitfactor"],
+            "Expectancy / Closed Trade": cs["expectancy"],
+            "Max Profit": cs["maxprofit"],
+            "Max Loss": cs["maxloss"],
+            "Gross Profit": cs["grossprofit"],
+            "Gross Loss": cs["grossloss"],
+        }])
+
         export_buffer=io.BytesIO()
         with pd.ExcelWriter(export_buffer,engine="openpyxl") as writer:
             x.drop(columns=["Entry DateTime","Exit DateTime"],errors="ignore").to_excel(writer,index=False,sheet_name="All Trades")
+            cumulative_df.to_excel(writer,index=False,sheet_name="Cumulative Performance")
             monthly_df.to_excel(writer,index=False,sheet_name="Monthly Analysis")
             strategy_df.to_excel(writer,index=False,sheet_name="Strategy Analysis")
             stock_df.to_excel(writer,index=False,sheet_name="Stock Analysis")
