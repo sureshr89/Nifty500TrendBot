@@ -296,6 +296,27 @@ def trend_check(state):
     market = dict(state.get("market", {}))
     buy_rows = state.get("buy_set", [])
     sell_rows = state.get("sell_set", [])
+
+    # Backfill older stored trades created before the 1D snapshot column was
+    # added. Match by SecurityId so existing history can display the correct
+    # pre-market 1D Return % when available.
+    _trend1d_by_sid = {}
+    for _r in state.get("classified", []) or []:
+        try:
+            _sid = int(_r.get("SecurityId"))
+            _v = _r.get("1D Return %", _r.get("trend_1d"))
+            if _v is not None:
+                _trend1d_by_sid[_sid] = _v
+        except (TypeError, ValueError):
+            continue
+    for _t in runtime.get("trades", []) or []:
+        if _t.get("trend_1d") is None:
+            try:
+                _sid = int(_t.get("SecurityId"))
+                if _sid in _trend1d_by_sid:
+                    _t["trend_1d"] = _trend1d_by_sid[_sid]
+            except (TypeError, ValueError):
+                pass
     # Breadth must always use the independently mapped official NIFTY 500.
     # Never inherit the smaller premarket classified/buy/sell state.
     universe_rows = load_full_nifty500_universe()
@@ -607,6 +628,9 @@ def trend_check(state):
                 "Symbol": stock["Symbol"], "SecurityId": sid,
                 "Sector": str(stock.get("Sector") or stock.get("Industry") or "").strip(),
                 "sector_ad": candidate_sector_ad(stock),
+                # Store the same pre-market 1D PDC-vs-previous-PDC percentage
+                # used for the reference trend display.
+                "trend_1d": stock.get("1D Return %", stock.get("trend_1d")),
                 "entry_price": entry, "quantity": quantity,
                 "risk_per_share": risk_per_share,
                 "risk_amount": actual_risk,
