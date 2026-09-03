@@ -24,7 +24,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v8-gift"
+APP_BUILD = "live-ltp-direct-v9-gift-global"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -316,9 +316,6 @@ def load_dhan_broad_index_ids():
         "Nifty Midcap 150": ["NIFTY MIDCAP 150", "NIFTY MIDCAP150"],
         "Nifty Smallcap 250": ["NIFTY SMALLCAP 250", "NIFTY SMALLCAP250"],
         "Nifty 500": ["NIFTY 500"],
-        # GIFT NIFTY naming can vary in Dhan\'s master; resolve dynamically
-        # instead of hard-coding a Security ID.
-        "GIFT NIFTY": ["GIFT NIFTY", "GIFTNIFTY"],
     }
 
     # Build one normalized name per searchable column. Prefer rows explicitly
@@ -375,6 +372,62 @@ def load_dhan_broad_index_ids():
             api_segment = "IDX_I"
         out[label] = {"security_id": int(hit["SECURITY_ID"]), "exchange_segment": api_segment}
     return out
+
+def load_gift_nifty_quote():
+    """Fetch GIFT NIFTY from Upstox Global Instruments when configured.
+
+    Dhan's documented API exchange-segment list does not expose an NSE IX/GIFT
+    segment, so GIFT NIFTY must not be forced through IDX_I. Upstox explicitly
+    supports GIFT NIFTY as GLOBAL_INDEX|SGX NIFTY.
+    """
+    token = st.secrets.get("UPSTOX_ACCESS_TOKEN")
+    if not token:
+        return {"ltp": None, "previous_close": None, "pct": None,
+                "status": "UPSTOX_ACCESS_TOKEN missing"}
+
+    try:
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        params = {"instrument_key": "GLOBAL_INDEX|SGX NIFTY"}
+        r = requests.get(
+            "https://api.upstox.com/v2/market-quote/quotes",
+            headers=headers,
+            params=params,
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json().get("data") or {}
+        row = data.get("GLOBAL_INDEX|SGX NIFTY") or next(iter(data.values()), {})
+        ltp = row.get("last_price")
+        try:
+            ltp = float(ltp)
+        except (TypeError, ValueError):
+            return {"ltp": None, "previous_close": None, "pct": None,
+                    "status": "invalid GIFT NIFTY response"}
+
+        pdc = row.get("prev_close")
+        if pdc is None:
+            pdc = row.get("previous_close")
+        try:
+            pdc = float(pdc) if pdc not in (None, "") else None
+        except (TypeError, ValueError):
+            pdc = None
+
+        pct = None
+        if pdc and pdc > 0:
+            pct = (ltp - pdc) / pdc * 100.0
+        elif row.get("net_change") not in (None, ""):
+            try:
+                pct = float(row.get("net_change_percent"))
+            except (TypeError, ValueError):
+                pass
+        return {"ltp": ltp, "previous_close": pdc, "pct": pct, "status": "LIVE"}
+    except Exception as e:
+        return {"ltp": None, "previous_close": None, "pct": None,
+                "status": f"GIFT NIFTY fetch failed: {type(e).__name__}"}
+
 
 def now_ist():
     return datetime.now(IST)
@@ -662,6 +715,8 @@ def trend_check(state):
     ad_ratio = (advances / declines) if declines > 0 else advances
     # Mandatory broad-market basis. All five indices are fetched from Dhan.
     index_ids = load_dhan_broad_index_ids()
+    # GIFT NIFTY is not requested from Dhan IDX_I. It is fetched from the
+    # dedicated global-index provider below.
     # Use the same authoritative LTP + net_change basis for the five indices.
     # Verify all five on every refresh and retry only an index for which Dhan
     # did not return a valid LTP in the first response.
@@ -714,6 +769,15 @@ def trend_check(state):
             "pdc": idx_pdc,
             "pct": pct,
         }
+    gift_quote = load_gift_nifty_quote()
+    index_basis["GIFT NIFTY"] = {
+        "security_id": None,
+        "exchange_segment": "GLOBAL_INDEX",
+        "ltp": gift_quote.get("ltp"),
+        "pdc": gift_quote.get("previous_close"),
+        "pct": gift_quote.get("pct"),
+        "status": gift_quote.get("status"),
+    }
 
     nifty500_basis = index_basis["Nifty 500"]
     ltp, pdc, day_pct = nifty500_basis.get("ltp"), nifty500_basis.get("pdc"), nifty500_basis.get("pct")
