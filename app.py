@@ -25,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v15-s1-open-filter-rr1-max2"
+APP_BUILD = "dry-run-v1-s1-rr1-max2-trades2-daily3000"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -859,20 +859,43 @@ def trend_check(state):
             })
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # New S1 entries: maximum 4 OPEN positions at any one time.
-    # There is intentionally no whole-day trade-count cap; when an open trade
-    # closes, another valid S1 opportunity may be taken while the entry window
-    # and all market/breadth safeguards remain satisfied.
-    # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
-    # Never allow a new entry on incomplete breadth coverage.
-    # This explicit check is kept here as a second safety gate even if mode logic changes.
+    # Final dry-run/live safety limits. These are independent hard gates,
+    # in addition to the strategy signal itself.
     MAX_OPEN_TRADES = 2
+    MAX_TRADES_PER_DAY = 2
+    MAX_DAILY_LOSS = 3000.0
+
+    def _same_trading_day(trade):
+        raw = str(trade.get("entry_time") or "")
+        return raw.startswith(dt.strftime("%Y-%m-%d"))
+
+    def _trade_realized_pnl(trade):
+        if str(trade.get("status")) != "CLOSED":
+            return 0.0
+        try:
+            entry=float(trade.get("entry_price",0) or 0)
+            exit_price=float(trade.get("exit_price",entry) or entry)
+            qty=float(trade.get("quantity",0) or 0)
+            return (exit_price-entry)*qty if str(trade.get("side","")).upper()=="BUY" else (entry-exit_price)*qty
+        except (TypeError, ValueError):
+            return 0.0
+
+    trades_today = [t for t in trades if _same_trading_day(t)]
+    daily_trade_count = len(trades_today)
+    daily_realized_loss = -sum(min(0.0, _trade_realized_pnl(t)) for t in trades_today)
+    daily_limits_ok = daily_trade_count < MAX_TRADES_PER_DAY and daily_realized_loss < MAX_DAILY_LOSS
+
     entry_diagnostics = {
         "entry_window": in_entry_window(dt),
         "breadth_ok": bool(breadth_valid and valid_count >= 480),
         "mode": mode,
         "open_positions": len(open_trades),
         "max_open_positions": MAX_OPEN_TRADES,
+        "trades_today": daily_trade_count,
+        "max_trades_per_day": MAX_TRADES_PER_DAY,
+        "daily_realized_loss": round(daily_realized_loss, 2),
+        "max_daily_loss": MAX_DAILY_LOSS,
+        "daily_limits_ok": daily_limits_ok,
         "candidates": 0,
         "sector_aligned": 0,
         "inside_range": 0,
@@ -880,8 +903,8 @@ def trend_check(state):
         "sizing_rejected": 0,
         "entries_opened": 0,
     }
-    if (len(open_trades) < MAX_OPEN_TRADES and in_entry_window(dt)
-            and breadth_valid and valid_count >= 480
+    if (len(open_trades) < MAX_OPEN_TRADES and daily_limits_ok
+            and in_entry_window(dt) and breadth_valid and valid_count >= 480
             and mode in ("BUY", "SELL")):
         candidates = buy_rows if mode == "BUY" else sell_rows
         entry_diagnostics["candidates"] = len(candidates)
@@ -1049,9 +1072,14 @@ def trend_check(state):
             # Do not stop after the first entry. S1 allows up to two
             # simultaneous open positions, so continue evaluating candidates
             # until the limit is reached.
-            if entry_made and len([t for t in trades if t.get("status") == "OPEN"]) >= MAX_OPEN_TRADES:
-                runtime["last_ltp"][str(sid)] = q["ltp"]
-                break
+            if entry_made:
+                # Hard-stop candidate processing when either simultaneous-position
+                # or whole-day trade limit is reached.
+                current_open = len([t for t in trades if t.get("status") == "OPEN"])
+                current_day_count = len([t for t in trades if _same_trading_day(t)])
+                if current_open >= MAX_OPEN_TRADES or current_day_count >= MAX_TRADES_PER_DAY:
+                    runtime["last_ltp"][str(sid)] = q["ltp"]
+                    break
             runtime["last_ltp"][str(sid)] = q["ltp"]
 
     # PDH/PDL come from the existing premarket scan sets. Attach them by
@@ -1092,7 +1120,7 @@ div[data-testid="stExpander"] {border-radius:12px;}
 """,unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 paper strategy")
+st.caption("Live Dhan monitoring • S1 DRY-RUN strategy • No real orders")
 
 try:
     state=load_premarket_state()
