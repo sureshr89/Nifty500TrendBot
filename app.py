@@ -537,6 +537,27 @@ def trend_check(state):
             client.quotes_with_change(quote_batch, exchange_segment="NSE_EQ")
         )
 
+    # Verify the response on EVERY refresh. A request for 500 instruments does
+    # not guarantee Dhan returned a valid LTP for all 500, so retry only the
+    # missing IDs once before the refresh is marked complete.
+    missing_stock_ids = [
+        sid for sid in unique_universe_ids
+        if sid not in live_quotes
+        or live_quotes[sid].get("ltp") is None
+        or float(live_quotes[sid].get("ltp") or 0) <= 0
+    ]
+    if missing_stock_ids:
+        retry_quotes = client.quotes_with_change(
+            missing_stock_ids, exchange_segment="NSE_EQ"
+        )
+        live_quotes.update(retry_quotes)
+
+    final_missing_stock_ids = [
+        sid for sid in unique_universe_ids
+        if sid not in live_quotes
+        or live_quotes[sid].get("ltp") is None
+        or float(live_quotes[sid].get("ltp") or 0) <= 0
+    ]
     quote_received_at = datetime.now(IST)
 
     # Populate BUY/SELL table LTP from the same quote batch.
@@ -617,9 +638,26 @@ def trend_check(state):
     # Mandatory broad-market basis. All five indices are fetched from Dhan.
     index_ids = load_dhan_broad_index_ids()
     # Use the same authoritative LTP + net_change basis for the five indices.
-    # This derives previous close from the current Dhan quote rather than
-    # assuming OHLC.close is always the desired previous-close reference.
-    index_quotes = client.quotes_with_change(list(index_ids.values()), exchange_segment="IDX_I")
+    # Verify all five on every refresh and retry only an index for which Dhan
+    # did not return a valid LTP in the first response.
+    required_index_ids = list(dict.fromkeys(int(x) for x in index_ids.values()))
+    index_quotes = client.quotes_with_change(required_index_ids, exchange_segment="IDX_I")
+    missing_index_ids = [
+        sid for sid in required_index_ids
+        if sid not in index_quotes
+        or index_quotes[sid].get("ltp") is None
+        or float(index_quotes[sid].get("ltp") or 0) <= 0
+    ]
+    if missing_index_ids:
+        index_quotes.update(
+            client.quotes_with_change(missing_index_ids, exchange_segment="IDX_I")
+        )
+    final_missing_index_ids = [
+        sid for sid in required_index_ids
+        if sid not in index_quotes
+        or index_quotes[sid].get("ltp") is None
+        or float(index_quotes[sid].get("ltp") or 0) <= 0
+    ]
     index_basis = {}
     for name, sid in index_ids.items():
         q = index_quotes.get(int(sid), {})
@@ -699,6 +737,12 @@ def trend_check(state):
         "quote_requested_at": quote_requested_at.strftime("%Y-%m-%d %H:%M:%S IST"),
         "quote_received_at": quote_received_at.strftime("%Y-%m-%d %H:%M:%S IST"),
         "quote_latency_seconds": round((quote_received_at - quote_requested_at).total_seconds(), 3),
+        "stock_ltp_requested": len(unique_universe_ids),
+        "stock_ltp_received": len(unique_universe_ids) - len(final_missing_stock_ids),
+        "stock_ltp_missing": len(final_missing_stock_ids),
+        "index_ltp_requested": len(required_index_ids),
+        "index_ltp_received": len(required_index_ids) - len(final_missing_index_ids),
+        "index_ltp_missing": len(final_missing_index_ids),
     })
 
     if "trend_runtime" not in st.session_state:
