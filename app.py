@@ -24,7 +24,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v7"
+APP_BUILD = "live-ltp-direct-v8-gift"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -1196,7 +1196,7 @@ def cards(pairs, cols=3):
 st.subheader("📊 Live Market")
 basis = market.get("index_basis", {}) or {}
 basis_rows = []
-for _name in ["Nifty 50", "Nifty Next 50", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 500"]:
+for _name in ["Nifty 50", "Nifty Next 50", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 500", "GIFT NIFTY"]:
     _v = basis.get(_name, {})
     _pct = _v.get("pct")
     _direction = "🟢 BUY" if _pct is not None and float(_pct) > 0 else ("🔴 SELL" if _pct is not None and float(_pct) < 0 else "⚪ NOT ALIGNED")
