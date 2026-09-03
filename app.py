@@ -67,10 +67,14 @@ def load_full_nifty500_universe():
     isin_mapping = unique_isin.set_index("ISIN")["SECURITY_ID"].to_dict()
     nifty["SecurityId"] = nifty["ISIN Code"].map(isin_mapping)
 
-    # Controlled fallback: unique NSE symbol -> Dhan trading symbol.
-    # This handles a temporary ISIN discrepancy in Dhan's security master
-    # without dropping an official NIFTY 500 constituent.
-    symbol_col = "SEM_TRADING_SYMBOL" if "SEM_TRADING_SYMBOL" in equity.columns else None
+    # Controlled fallback: unique NSE symbol -> Dhan symbol. Dhan's detailed
+    # master has used different symbol-column names across versions, so detect
+    # the available column instead of assuming one fixed schema.
+    symbol_candidates = [
+        "SEM_TRADING_SYMBOL", "SYMBOL_NAME", "SYMBOL", "TRADING_SYMBOL",
+        "SEM_CUSTOM_SYMBOL", "SEM_SMST_SECURITY_ID",
+    ]
+    symbol_col = next((c for c in symbol_candidates if c in equity.columns), None)
     if symbol_col:
         equity["_SYMBOL"] = equity[symbol_col].astype(str).str.upper().str.strip()
         symbol_counts = equity["_SYMBOL"].value_counts()
@@ -83,9 +87,10 @@ def load_full_nifty500_universe():
     # non-standard/blank SERIES or INSTRUMENT metadata for an otherwise valid
     # NSE cash-equity constituent (HFCL is one such example).
     missing_mask = nifty["SecurityId"].isna()
-    if missing_mask.any() and "SEM_TRADING_SYMBOL" in master.columns:
+    broad_symbol_col = next((c for c in symbol_candidates if c in master.columns), None)
+    if missing_mask.any() and broad_symbol_col:
         broad = master[master["EXCH_ID"].astype(str).str.upper().eq("NSE")].copy()
-        broad["_SYMBOL"] = broad["SEM_TRADING_SYMBOL"].astype(str).str.upper().str.strip()
+        broad["_SYMBOL"] = broad[broad_symbol_col].astype(str).str.upper().str.strip()
         broad = broad[broad["_SYMBOL"].isin(nifty.loc[missing_mask, "Symbol"])]
         if not broad.empty:
             # Prefer a single candidate; otherwise prefer rows whose segment
