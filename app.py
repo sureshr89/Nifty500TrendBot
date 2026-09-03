@@ -793,7 +793,11 @@ def trend_check(state):
             if entry_made:
                 entry_diagnostics["entries_opened"] += 1
 
-            if entry_made:
+            # Do not stop after the first entry. S1 allows up to four
+            # simultaneous open positions, so continue evaluating candidates
+            # until the limit is reached.
+            if entry_made and len([t for t in trades if t.get("status") == "OPEN"]) >= MAX_OPEN_TRADES:
+                runtime["last_ltp"][str(sid)] = q["ltp"]
                 break
             runtime["last_ltp"][str(sid)] = q["ltp"]
 
