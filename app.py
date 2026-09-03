@@ -556,18 +556,16 @@ def trend_check(state):
             bucket["unchanged"] += 1
     for sector, bucket in sector_breadth.items():
         adv, dec = bucket["advances"], bucket["declines"]
-        bucket["ad_ratio"] = (adv / dec) if dec > 0 else (float("inf") if adv > 0 else None)
+        # Display/strategy convention requested for zero decliners:
+        # x / 0 is represented as x; 0 / 0 is represented as 0.
+        bucket["ad_ratio"] = (adv / dec) if dec > 0 else adv
 
     # A/D may be displayed at any coverage, but it is VALID FOR NEW TRADES
     # only when at least 480 of the 500 NIFTY 500 stocks have valid LTP + PDC.
     # Existing open positions are monitored independently below.
     breadth_valid = valid_count >= 480
-    if declines > 0:
-        ad_ratio = advances / declines
-    elif advances > 0:
-        ad_ratio = float("inf")
-    else:
-        ad_ratio = None
+    # Requested A/D convention: x / 0 displays as x, and 0 / 0 as 0.
+    ad_ratio = (advances / declines) if declines > 0 else advances
     # Mandatory broad-market basis. All five indices are fetched from Dhan.
     index_ids = load_dhan_broad_index_ids()
     # Index alignment requires both live LTP and previous close. The LTP
