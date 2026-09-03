@@ -287,11 +287,18 @@ def add_s1_levels(frame, history_by_sid=None):
 def scan_nifty500():
     client = DhanClient()
     universe = load_nifty500_universe()
-    if len(universe) != 500:
-        raise RuntimeError(f"NIFTY 500 universe must contain exactly 500 mapped stocks; got {len(universe)}")
+    # Mapping coverage is allowed to be below 500 when a current Dhan master
+    # record is temporarily unavailable. The same 480-stock safety threshold
+    # used by the live bot applies to the pre-market scan.
+    if len(universe) < 480:
+        raise RuntimeError(
+            f"NIFTY 500 universe coverage too low for scan: expected at least 480 mapped stocks; got {len(universe)}"
+        )
     universe = universe.drop_duplicates(subset=["SecurityId"]).copy()
-    if len(universe) != 500:
-        raise RuntimeError(f"NIFTY 500 universe must contain 500 unique Security IDs; got {len(universe)}")
+    if len(universe) < 480:
+        raise RuntimeError(
+            f"NIFTY 500 universe has insufficient unique Security IDs: expected at least 480, got {len(universe)}"
+        )
     rows, errors, history_by_sid = [], [], {}
 
     for _, stock in universe.iterrows():
