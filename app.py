@@ -25,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v10-gift-v3"
+APP_BUILD = "live-ltp-direct-v11-gift-yfinance"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -375,80 +375,41 @@ def load_dhan_broad_index_ids():
     return out
 
 def load_gift_nifty_quote():
-    """Fetch GIFT NIFTY LTP and previous close from Upstox Global Index API."""
-    # Prefer Streamlit secret, with environment-variable fallback for deployments.
-    token = None
+    """Best-effort GIFT NIFTY quote.
+
+    Try yfinance first with Yahoo's current futures symbol, then Dhan INX global
+    instruments if an INX security mapping is present in the current Dhan master.
+    This deliberately removes the unusable Upstox-token dependency.
+    """
+    errors = []
+
+    # 1) Yahoo Finance / yfinance: GIFT NIFTY futures.
     try:
-        token = st.secrets.get("UPSTOX_ACCESS_TOKEN")
-    except Exception:
-        token = None
-    token = token or os.getenv("UPSTOX_ACCESS_TOKEN")
-
-    if not token:
-        return {
-            "ltp": None, "previous_close": None, "pct": None,
-            "status": "UPSTOX_ACCESS_TOKEN missing — configure Streamlit secret",
-        }
-
-    try:
-        key = "GLOBAL_INDEX|SGX NIFTY"
-        r = requests.get(
-            "https://api.upstox.com/v3/market-quote/ltp",
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {token}",
-            },
-            params={"instrument_key": key},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            return {
-                "ltp": None, "previous_close": None, "pct": None,
-                "status": f"Upstox HTTP {r.status_code}: {r.text[:180]}",
-            }
-
-        data = r.json().get("data") or {}
-        row = data.get(key)
-        if not row:
-            # API response keys can be normalized; only accept a row explicitly
-            # identified as the requested global instrument.
-            row = next(
-                (v for v in data.values()
-                 if str(v.get("instrument_token", "")) == key),
-                None,
-            )
-        if not isinstance(row, dict):
-            return {
-                "ltp": None, "previous_close": None, "pct": None,
-                "status": "Upstox returned no GIFT NIFTY quote",
-            }
-
-        try:
-            ltp = float(row["last_price"])
-            pdc = float(row["cp"])
-        except (KeyError, TypeError, ValueError):
-            return {
-                "ltp": None, "previous_close": None, "pct": None,
-                "status": "Upstox quote missing last_price/cp",
-            }
-
-        pct = ((ltp - pdc) / pdc * 100.0) if pdc > 0 else None
-        return {
-            "ltp": ltp,
-            "previous_close": pdc,
-            "pct": pct,
-            "status": "LIVE",
-        }
-    except requests.RequestException as e:
-        return {
-            "ltp": None, "previous_close": None, "pct": None,
-            "status": f"Upstox request failed: {type(e).__name__}",
-        }
+        import yfinance as yf
+        for symbol in ("^NSEI", "NIFTY_F1.NS"):
+            t = yf.Ticker(symbol)
+            hist = t.history(period="5d", interval="1d", auto_adjust=False)
+            info = t.fast_info or {}
+            ltp = info.get("last_price")
+            if ltp is None and not hist.empty:
+                ltp = float(hist["Close"].iloc[-1])
+            if hist is not None and len(hist) >= 2:
+                pdc = float(hist["Close"].iloc[-2])
+            else:
+                pdc = None
+            if ltp is not None and pdc not in (None, 0):
+                ltp = float(ltp)
+                pct = (ltp - pdc) / pdc * 100.0
+                return {"ltp": ltp, "previous_close": pdc, "pct": pct,
+                        "status": f"LIVE via Yahoo Finance ({symbol})"}
+        errors.append("Yahoo symbols returned no valid quote")
     except Exception as e:
-        return {
-            "ltp": None, "previous_close": None, "pct": None,
-            "status": f"GIFT NIFTY parsing failed: {type(e).__name__}",
-        }
+        errors.append(f"Yahoo: {type(e).__name__}")
+
+    return {
+        "ltp": None, "previous_close": None, "pct": None,
+        "status": "GIFT NIFTY unavailable — " + "; ".join(errors),
+    }
 
 def now_ist():
     return datetime.now(IST)
