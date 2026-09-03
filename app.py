@@ -70,9 +70,12 @@ def load_full_nifty500_universe():
     # Controlled fallback: unique NSE symbol -> Dhan symbol. Dhan's detailed
     # master has used different symbol-column names across versions, so detect
     # the available column instead of assuming one fixed schema.
+    # Dhan documents SYMBOL_NAME/SM_SYMBOL_NAME as symbol name,
+    # SEM_TRADING_SYMBOL as exchange trading symbol and DISPLAY_NAME/
+    # SEM_CUSTOM_SYMBOL as Dhan display symbol. Search every documented alias.
     symbol_candidates = [
-        "SEM_TRADING_SYMBOL", "SYMBOL_NAME", "SYMBOL", "TRADING_SYMBOL",
-        "SEM_CUSTOM_SYMBOL", "SEM_SMST_SECURITY_ID",
+        "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME",
+        "DISPLAY_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "TRADING_SYMBOL",
     ]
     symbol_col = next((c for c in symbol_candidates if c in equity.columns), None)
     if symbol_col:
@@ -105,23 +108,36 @@ def load_full_nifty500_universe():
                 if len(candidates) == 1:
                     nifty.at[idx, "SecurityId"] = candidates.iloc[0]["SECURITY_ID"]
 
+    # Last identity fallback: search the entire NSE portion of the master by
+    # exact ISIN, independent of SERIES/INSTRUMENT filters. This is safer than
+    # assuming every current Dhan equity row is labelled EQUITY/E/EQ.
+    missing_mask = nifty["SecurityId"].isna()
+    if missing_mask.any() and "ISIN" in master.columns:
+        broad_isin = master[master["EXCH_ID"].astype(str).str.upper().eq("NSE")].copy()
+        broad_isin["_ISIN"] = broad_isin["ISIN"].astype(str).str.upper().str.strip()
+        for idx in nifty.index[missing_mask]:
+            isin = nifty.at[idx, "ISIN Code"]
+            candidates = broad_isin[broad_isin["_ISIN"].eq(isin)]
+            if len(candidates) == 1:
+                nifty.at[idx, "SecurityId"] = candidates.iloc[0]["SECURITY_ID"]
+
     unresolved = nifty[nifty["SecurityId"].isna()]
+    # Never collapse the entire live dashboard to zero because one constituent
+    # is temporarily absent from Dhan's current instrument master. Keep the
+    # mapped universe and let the existing 480-stock breadth safety rule decide
+    # whether new trades are allowed.
+    unresolved_details = []
     if not unresolved.empty:
-        details = ", ".join(
+        unresolved_details = [
             f"{r['Symbol']} ({r['ISIN Code']})"
             for _, r in unresolved.iterrows()
-        )
-        raise RuntimeError(
-            f"NIFTY 500 membership could not be mapped to Dhan IDs: {details}"
-        )
+        ]
+        nifty = nifty[nifty["SecurityId"].notna()].copy()
 
     nifty["SecurityId"] = nifty["SecurityId"].astype(int)
     if nifty["SecurityId"].duplicated().any():
         dupes = nifty[nifty["SecurityId"].duplicated(keep=False)][["Symbol", "SecurityId"]]
         raise RuntimeError(f"Duplicate Dhan Security ID mapping in NIFTY 500: {dupes.to_dict(orient='records')}")
-    if len(nifty) != 500:
-        raise RuntimeError(f"NIFTY 500 membership mapped to Dhan IDs incomplete: expected 500, got {len(nifty)}")
-
     sector = nifty["Industry"].fillna("Other").astype(str) if "Industry" in nifty.columns else "Other"
     return pd.DataFrame({
         "Company": nifty["Company Name"].astype(str),
