@@ -209,6 +209,47 @@ class DhanLiveClient:
             out[int(sid)] = {"ltp": ltp}
         return out
 
+    def quotes_with_change(self, security_ids, exchange_segment="NSE_EQ"):
+        """Fetch authoritative LTP + previous-close basis in one Dhan quote call.
+
+        Dhan's Quote response includes last_price and net_change, where
+        net_change is the absolute change from the previous day's close.
+        Therefore previous_close = last_price - net_change. This avoids mixing
+        today's live LTP with a stale pre-market PDC.
+        """
+        ids = list(dict.fromkeys(int(x) for x in security_ids))
+        if not ids:
+            return {}
+        data = self.post("/marketfeed/quote", {exchange_segment: ids})
+        rows = ((data.get("data") or {}).get(exchange_segment) or {})
+        out = {}
+        for sid in ids:
+            row = rows.get(str(sid), rows.get(sid, {}))
+            try:
+                ltp = float(row.get("last_price"))
+            except (TypeError, ValueError):
+                continue
+            if ltp <= 0:
+                continue
+            pdc = None
+            try:
+                net_change = row.get("net_change")
+                if net_change not in (None, ""):
+                    pdc = ltp - float(net_change)
+            except (TypeError, ValueError):
+                pdc = None
+            if pdc is None or pdc <= 0:
+                ohlc = row.get("ohlc") or {}
+                try:
+                    close = float(ohlc.get("close"))
+                    if close > 0:
+                        pdc = close
+                except (TypeError, ValueError):
+                    pass
+            out[int(sid)] = {"ltp": ltp, "previous_close": pdc}
+        return out
+
+
     def quotes_with_ohlc(self, security_ids, exchange_segment="NSE_EQ"):
         """Small OHLC request used only where previous-close is required."""
         ids = list(dict.fromkeys(int(x) for x in security_ids))
@@ -268,7 +309,9 @@ def load_dhan_broad_index_ids():
         raise RuntimeError("Dhan security master does not contain required index name/security-id columns")
 
     aliases = {
-        "Nifty 50": ["NIFTY 50", "NIFTY"],
+        # Do not use bare "NIFTY" here: it can match derivative/underlying
+        # aliases before the actual NIFTY 50 index row in the security master.
+        "Nifty 50": ["NIFTY 50"],
         "Nifty Next 50": ["NIFTY NEXT 50", "NIFTY NEXT50"],
         "Nifty Midcap 150": ["NIFTY MIDCAP 150", "NIFTY MIDCAP150"],
         "Nifty Smallcap 250": ["NIFTY SMALLCAP 250", "NIFTY SMALLCAP250"],
@@ -483,12 +526,15 @@ def trend_check(state):
     # Record request and response times so the dashboard never presents an
     # old cycle as "live". Each rerun requests a new LTP snapshot from Dhan.
     quote_requested_at = datetime.now(IST)
+    # One authoritative Quote snapshot for all 500 stocks. It returns the
+    # current LTP and net_change, allowing previous close to be derived from
+    # the same live response instead of mixing current LTP with saved scan data.
     live_quotes = {}
     quote_batch_size = 500
     for start in range(0, len(unique_universe_ids), quote_batch_size):
         quote_batch = unique_universe_ids[start:start + quote_batch_size]
         live_quotes.update(
-            client.quotes(quote_batch, exchange_segment="NSE_EQ")
+            client.quotes_with_change(quote_batch, exchange_segment="NSE_EQ")
         )
 
     quote_received_at = datetime.now(IST)
@@ -502,15 +548,17 @@ def trend_check(state):
                 stock["DHAN_LIVE_VALID"] = bool(q.get("ltp") is not None and float(q.get("ltp") or 0) > 0)
         except (TypeError, ValueError):
             pass
-    # Prefer saved PDC; otherwise use the previous-close value returned with
-    # the same Dhan OHLC quote batch. This keeps A/D live even when the scan
-    # state does not carry a PDC column.
+    # Prefer previous close derived from the SAME live Dhan Quote snapshot.
+    # Saved pre-market PDC is only a fallback when Dhan omits net_change.
     resolved_pdc = {}
     for sid, q in live_quotes.items():
-        pdc = pdc_by_id.get(sid)
-        if not pdc:
+        try:
+            pdc = float(q.get("previous_close", 0) or 0)
+        except (TypeError, ValueError):
+            pdc = 0
+        if not pdc or pdc <= 0:
             try:
-                pdc = float(q.get("previous_close", 0) or 0)
+                pdc = float(pdc_by_id.get(sid, 0) or 0)
             except (TypeError, ValueError):
                 pdc = 0
         if pdc and pdc > 0:
@@ -568,10 +616,10 @@ def trend_check(state):
     ad_ratio = (advances / declines) if declines > 0 else advances
     # Mandatory broad-market basis. All five indices are fetched from Dhan.
     index_ids = load_dhan_broad_index_ids()
-    # Index alignment requires both live LTP and previous close. The LTP
-    # endpoint intentionally returns only last_price, so use OHLC for these
-    # five indices only; equities continue using the faster 500-stock LTP call.
-    index_quotes = client.quotes_with_ohlc(list(index_ids.values()), exchange_segment="IDX_I")
+    # Use the same authoritative LTP + net_change basis for the five indices.
+    # This derives previous close from the current Dhan quote rather than
+    # assuming OHLC.close is always the desired previous-close reference.
+    index_quotes = client.quotes_with_change(list(index_ids.values()), exchange_segment="IDX_I")
     index_basis = {}
     for name, sid in index_ids.items():
         q = index_quotes.get(int(sid), {})
