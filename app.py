@@ -1089,16 +1089,19 @@ with st.expander("🎯 S1 — Strategy Rules",expanded=False):
 diag = market.get("entry_diagnostics", {})
 with st.expander("🔎 S1 Entry Diagnostics", expanded=False):
     st.caption("Exact live gates for the current scan cycle; this does not change S1 logic.")
-    d1 = st.columns(4)
-    d1[0].metric("Market Mode", str(diag.get("mode", "UNKNOWN")))
-    d1[1].metric("Open Positions", f"{diag.get("open_positions", 0)} / {diag.get("max_open_positions", 4)}")
-    d1[2].metric("Candidates Checked", diag.get("candidates", 0))
-    d1[3].metric("Entries This Cycle", diag.get("entries_opened", 0))
-    d2 = st.columns(4)
-    d2[0].metric("Sector Aligned", diag.get("sector_aligned", 0))
-    d2[1].metric("Inside PDH–PDL", diag.get("inside_range", 0))
-    d2[2].metric("Fresh Crossings", diag.get("cross_detected", 0))
-    d2[3].metric("Sizing Rejected", diag.get("sizing_rejected", 0))
+    # Use the same mobile-safe card grid as the performance sections.
+    # The grid remains three cards across on narrow screens instead of
+    # Streamlit st.columns(4), which was stacking into one long column.
+    cards([
+        ("Market Mode", str(diag.get("mode", "UNKNOWN"))),
+        ("Open Positions", f"{diag.get('open_positions', 0)} / {diag.get('max_open_positions', 4)}"),
+        ("Candidates Checked", diag.get("candidates", 0)),
+        ("Entries This Cycle", diag.get("entries_opened", 0)),
+        ("Sector Aligned", diag.get("sector_aligned", 0)),
+        ("Inside PDH–PDL", diag.get("inside_range", 0)),
+        ("Fresh Crossings", diag.get("cross_detected", 0)),
+        ("Sizing Rejected", diag.get("sizing_rejected", 0)),
+    ], 3)
     st.caption(
         f"Entry window: {'ACTIVE' if diag.get('entry_window') else 'CLOSED'} • "
         f"Breadth: {'OK' if diag.get('breadth_ok') else 'BLOCKED'}"
