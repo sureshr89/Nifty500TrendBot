@@ -209,6 +209,39 @@ class DhanLiveClient:
             out[int(sid)] = {"ltp": ltp}
         return out
 
+    def quotes_with_ohlc(self, security_ids, exchange_segment="NSE_EQ"):
+        """Small OHLC request used only where previous-close is required."""
+        ids = list(dict.fromkeys(int(x) for x in security_ids))
+        if not ids:
+            return {}
+        data = self.post("/marketfeed/ohlc", {exchange_segment: ids})
+        rows = ((data.get("data") or {}).get(exchange_segment) or {})
+        out = {}
+        for sid in ids:
+            row = rows.get(str(sid), rows.get(sid, {}))
+            ohlc = row.get("ohlc") or {}
+            ltp = row.get("last_price")
+            try:
+                ltp = float(ltp)
+            except (TypeError, ValueError):
+                continue
+            if ltp <= 0:
+                continue
+            pdc = row.get("previous_close")
+            if pdc is None:
+                pdc = row.get("prev_close")
+            if pdc is None:
+                pdc = ohlc.get("previous_close")
+            if pdc is None:
+                pdc = ohlc.get("close")
+            try:
+                pdc = float(pdc) if pdc not in (None, "") else None
+            except (TypeError, ValueError):
+                pdc = None
+            out[int(sid)] = {"ltp": ltp, "previous_close": pdc}
+        return out
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_dhan_broad_index_ids():
     """Resolve required broad-market indices from Dhan's detailed security master.
@@ -537,7 +570,10 @@ def trend_check(state):
         ad_ratio = None
     # Mandatory broad-market basis. All five indices are fetched from Dhan.
     index_ids = load_dhan_broad_index_ids()
-    index_quotes = client.quotes(list(index_ids.values()), exchange_segment="IDX_I")
+    # Index alignment requires both live LTP and previous close. The LTP
+    # endpoint intentionally returns only last_price, so use OHLC for these
+    # five indices only; equities continue using the faster 500-stock LTP call.
+    index_quotes = client.quotes_with_ohlc(list(index_ids.values()), exchange_segment="IDX_I")
     index_basis = {}
     for name, sid in index_ids.items():
         q = index_quotes.get(int(sid), {})
