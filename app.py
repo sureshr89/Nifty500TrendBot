@@ -647,10 +647,24 @@ def trend_check(state):
     # Never allow a new entry on incomplete breadth coverage.
     # This explicit check is kept here as a second safety gate even if mode logic changes.
     MAX_OPEN_TRADES = 4
+    entry_diagnostics = {
+        "entry_window": in_entry_window(dt),
+        "breadth_ok": bool(breadth_valid and valid_count >= 480),
+        "mode": mode,
+        "open_positions": len(open_trades),
+        "max_open_positions": MAX_OPEN_TRADES,
+        "candidates": 0,
+        "sector_aligned": 0,
+        "inside_range": 0,
+        "cross_detected": 0,
+        "sizing_rejected": 0,
+        "entries_opened": 0,
+    }
     if (len(open_trades) < MAX_OPEN_TRADES and in_entry_window(dt)
             and breadth_valid and valid_count >= 480
             and mode in ("BUY", "SELL")):
         candidates = buy_rows if mode == "BUY" else sell_rows
+        entry_diagnostics["candidates"] = len(candidates)
 
         # Priority across stocks: strongest sector breadth first for BUY,
         # weakest sector breadth first for SELL.
@@ -742,6 +756,7 @@ def trend_check(state):
             if not sector_bias_ok:
                 runtime["last_ltp"][str(sid)] = q["ltp"]
                 continue
+            entry_diagnostics["sector_aligned"] += 1
             entry_made = False
             open_symbols = {
                 str(t.get("Symbol", "")).upper()
@@ -752,16 +767,31 @@ def trend_check(state):
                 runtime["last_ltp"][str(sid)] = q["ltp"]
                 continue
 
+            inside_range = pdl < q["open"] < pdh
+            if inside_range:
+                entry_diagnostics["inside_range"] += 1
             if mode == "BUY":
-                s1 = pdl < q["open"] < pdh and prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
+                crossed = prev_ltp is not None and prev_ltp < pdh and q["ltp"] >= pdh
+                if crossed:
+                    entry_diagnostics["cross_detected"] += 1
+                s1 = inside_range and crossed
                 if s1:
                     sl=pdl; risk=q["ltp"]-sl
-                    if risk>0: entry_made=open_position("S1","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
+                    if risk>0:
+                        entry_made=open_position("S1","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
             else:
-                s1=pdl<q["open"]<pdh and prev_ltp is not None and prev_ltp>pdl and q["ltp"]<=pdl
+                crossed = prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
+                if crossed:
+                    entry_diagnostics["cross_detected"] += 1
+                s1=inside_range and crossed
                 if s1:
                     sl=pdh; risk=sl-q["ltp"]
-                    if risk>0: entry_made=open_position("S1","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
+                    if risk>0:
+                        entry_made=open_position("S1","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
+            if s1 and not entry_made:
+                entry_diagnostics["sizing_rejected"] += 1
+            if entry_made:
+                entry_diagnostics["entries_opened"] += 1
 
             if entry_made:
                 break
@@ -787,6 +817,7 @@ def trend_check(state):
                 _row["PDH"] = _rng[0]
             if _row.get("PDL") in (None, ""):
                 _row["PDL"] = _rng[1]
+    market["entry_diagnostics"] = entry_diagnostics
     persist_trades(runtime)
     return market, runtime["trades"]
 
