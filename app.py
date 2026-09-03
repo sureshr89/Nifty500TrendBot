@@ -764,9 +764,6 @@ buy_rows=state.get("buy_set",[])
 sell_rows=state.get("sell_set",[])
 mode=market.get("mode","NEUTRAL")
 
-# Dashboard datasets used by Today and cumulative performance sections
-tdf=trade_df(today_items) if "trade_df" in globals() else pd.DataFrame()
-
 def pnl(t):
     q=float(t.get("quantity",0) or 0); e=float(t.get("entry_price",0) or 0)
     px=t.get("exit_price") if t.get("status")=="CLOSED" else None
