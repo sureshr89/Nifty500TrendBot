@@ -31,9 +31,10 @@ st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_full_nifty500_universe():
-    """Independent live breadth universe: always map the official 500 constituents.
+    """Map every official NSE NIFTY 500 constituent to a Dhan NSE_EQ Security ID.
 
-    This deliberately does not depend on the premarket classified/buy/sell sets.
+    ISIN is the primary key. If Dhan's current master has an ISIN mismatch,
+    a unique NSE trading-symbol match is used as a controlled fallback.
     """
     nse = requests.get(
         "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv",
@@ -42,11 +43,16 @@ def load_full_nifty500_universe():
     )
     nse.raise_for_status()
     nifty = pd.read_csv(StringIO(nse.text))
+    if len(nifty) != 500:
+        raise RuntimeError(f"Official NSE NIFTY 500 file has {len(nifty)} rows; expected 500")
+
     master = pd.read_csv(
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
         low_memory=False,
     )
     nifty["ISIN Code"] = nifty["ISIN Code"].astype(str).str.upper().str.strip()
+    nifty["Symbol"] = nifty["Symbol"].astype(str).str.upper().str.strip()
+
     equity = master[
         master["EXCH_ID"].astype(str).str.upper().eq("NSE")
         & master["SEGMENT"].astype(str).str.upper().eq("E")
@@ -54,19 +60,46 @@ def load_full_nifty500_universe():
         & master["SERIES"].astype(str).str.upper().eq("EQ")
     ].copy()
     equity["ISIN"] = equity["ISIN"].astype(str).str.upper().str.strip()
-    mapping = equity.drop_duplicates("ISIN").set_index("ISIN")["SECURITY_ID"].to_dict()
-    # NSE is used only to identify the official NIFTY 500 members. Every
-    # tradable identifier below comes from the Dhan NSE_EQ security master.
-    nifty["SecurityId"] = nifty["ISIN Code"].map(mapping)
-    nifty = nifty.dropna(subset=["SecurityId"]).copy()
+
+    # Primary, safest mapping: official NSE ISIN -> Dhan Security ID.
+    isin_counts = equity["ISIN"].value_counts()
+    unique_isin = equity[equity["ISIN"].map(isin_counts).eq(1)]
+    isin_mapping = unique_isin.set_index("ISIN")["SECURITY_ID"].to_dict()
+    nifty["SecurityId"] = nifty["ISIN Code"].map(isin_mapping)
+
+    # Controlled fallback: unique NSE symbol -> Dhan trading symbol.
+    # This handles a temporary ISIN discrepancy in Dhan's security master
+    # without dropping an official NIFTY 500 constituent.
+    symbol_col = "SEM_TRADING_SYMBOL" if "SEM_TRADING_SYMBOL" in equity.columns else None
+    if symbol_col:
+        equity["_SYMBOL"] = equity[symbol_col].astype(str).str.upper().str.strip()
+        symbol_counts = equity["_SYMBOL"].value_counts()
+        unique_symbol = equity[equity["_SYMBOL"].map(symbol_counts).eq(1)]
+        symbol_mapping = unique_symbol.set_index("_SYMBOL")["SECURITY_ID"].to_dict()
+        missing_mask = nifty["SecurityId"].isna()
+        nifty.loc[missing_mask, "SecurityId"] = nifty.loc[missing_mask, "Symbol"].map(symbol_mapping)
+
+    unresolved = nifty[nifty["SecurityId"].isna()]
+    if not unresolved.empty:
+        details = ", ".join(
+            f"{r['Symbol']} ({r['ISIN Code']})"
+            for _, r in unresolved.iterrows()
+        )
+        raise RuntimeError(
+            f"NIFTY 500 membership could not be mapped to Dhan IDs: {details}"
+        )
+
     nifty["SecurityId"] = nifty["SecurityId"].astype(int)
-    nifty = nifty.drop_duplicates(subset=["SecurityId"]).copy()
+    if nifty["SecurityId"].duplicated().any():
+        dupes = nifty[nifty["SecurityId"].duplicated(keep=False)][["Symbol", "SecurityId"]]
+        raise RuntimeError(f"Duplicate Dhan Security ID mapping in NIFTY 500: {dupes.to_dict(orient='records')}")
     if len(nifty) != 500:
         raise RuntimeError(f"NIFTY 500 membership mapped to Dhan IDs incomplete: expected 500, got {len(nifty)}")
+
     sector = nifty["Industry"].fillna("Other").astype(str) if "Industry" in nifty.columns else "Other"
     return pd.DataFrame({
         "Company": nifty["Company Name"].astype(str),
-        "Symbol": nifty["Symbol"].astype(str).str.upper().str.strip(),
+        "Symbol": nifty["Symbol"],
         "Sector": sector,
         "SecurityId": nifty["SecurityId"],
     }).to_dict(orient="records")
@@ -1080,7 +1113,7 @@ with st.expander("🏢 Sector A/D",expanded=False):
 
 # 7 FULL NIFTY 500 LIVE DATA - COLLAPSIBLE
 # trend_check owns the one shared 15-second quote scan; read its returned snapshot.
-dashboard_universe_rows = market.get("breadth_universe_rows", load_full_nifty500_universe())
+dashboard_universe_rows = market.get("breadth_universe_rows")\nif not dashboard_universe_rows:\n    dashboard_universe_rows = []
 dashboard_live_quotes = market.get("live_quotes", {})
 dashboard_resolved_pdc = market.get("resolved_pdc", {})
 st.divider()
