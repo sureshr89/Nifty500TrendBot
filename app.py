@@ -10,7 +10,6 @@ import json
 import time
 import base64
 import os
-import html as html_lib
 from datetime import datetime
 from io import StringIO
 from zoneinfo import ZoneInfo
@@ -26,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v13-gift-nseix-block"
+APP_BUILD = "live-ltp-direct-v14-5indices"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -375,76 +374,6 @@ def load_dhan_broad_index_ids():
         out[label] = {"security_id": int(hit["SECURITY_ID"]), "exchange_segment": api_segment}
     return out
 
-def load_gift_nifty_quote():
-    """Fetch near-month GIFT NIFTY from the official NSEIX live page.
-
-    The official page text contains a stable 'Intra Day Price – Near month GIFT
-    NIFTY Future' block. Parse that block directly instead of trying to match
-    the entire Live Watch table.
-    """
-    try:
-        r = requests.get(
-            "https://www1.nseix.com/",
-            headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        raw = r.text
-        plain = html_lib.unescape(re.sub(r"<[^>]+>", " ", raw))
-        plain = re.sub(r"\s+", " ", plain)
-
-        # Official current page block:
-        # Intra Day Price – Near month GIFT NIFTY Future <LTP> <Change> (<Pct>%)
-        m = re.search(
-            r"Near\s*month\s*GIFT\s*NIFTY\s*Future\s*"
-            r"([0-9][0-9,]*(?:\.\d+)?)\s*"
-            r"([+-]?[0-9][0-9,]*(?:\.\d+)?)\s*"
-            r"\(\s*([+-]?[0-9]+(?:\.\d+)?)%\s*\)",
-            plain,
-            re.IGNORECASE,
-        )
-        if not m:
-            # Fallback to the first near-month NIFTY row in the official table.
-            m = re.search(
-                r"Index\s*Futures\s*\|?\s*NIFTY\s*\|?\s*"
-                r"[0-9]{1,2}-[A-Za-z]{3}-[0-9]{4}.*?"
-                r"([0-9][0-9,]*(?:\.\d+)?)\s*\|?\s*"
-                r"([+-]?[0-9][0-9,]*(?:\.\d+)?)\s*\|?\s*"
-                r"([+-]?[0-9]+(?:\.\d+)?)",
-                plain,
-                re.IGNORECASE,
-            )
-
-        if not m:
-            return {
-                "ltp": None, "previous_close": None, "pct": None,
-                "status": "NSEIX live quote block not found",
-            }
-
-        ltp = float(m.group(1).replace(",", ""))
-        change = float(m.group(2).replace(",", ""))
-        pct = float(m.group(3))
-        pdc = ltp - change
-        if ltp <= 0 or pdc <= 0:
-            return {
-                "ltp": None, "previous_close": None, "pct": None,
-                "status": "NSEIX returned invalid GIFT NIFTY values",
-            }
-        return {
-            "ltp": ltp,
-            "previous_close": pdc,
-            "pct": pct,
-            "status": "LIVE via official NSEIX",
-        }
-    except Exception as e:
-        return {
-            "ltp": None, "previous_close": None, "pct": None,
-            "status": f"NSEIX request failed: {type(e).__name__}",
-        }
-
 def now_ist():
     return datetime.now(IST)
 
@@ -731,8 +660,6 @@ def trend_check(state):
     ad_ratio = (advances / declines) if declines > 0 else advances
     # Mandatory broad-market basis. All five indices are fetched from Dhan.
     index_ids = load_dhan_broad_index_ids()
-    # GIFT NIFTY is not requested from Dhan IDX_I. It is fetched from the
-    # dedicated global-index provider below.
     # Use the same authoritative LTP + net_change basis for the five indices.
     # Verify all five on every refresh and retry only an index for which Dhan
     # did not return a valid LTP in the first response.
@@ -785,15 +712,6 @@ def trend_check(state):
             "pdc": idx_pdc,
             "pct": pct,
         }
-    gift_quote = load_gift_nifty_quote()
-    index_basis["GIFT NIFTY"] = {
-        "security_id": None,
-        "exchange_segment": "GLOBAL_INDEX",
-        "ltp": gift_quote.get("ltp"),
-        "pdc": gift_quote.get("previous_close"),
-        "pct": gift_quote.get("pct"),
-        "status": gift_quote.get("status"),
-    }
 
     nifty500_basis = index_basis["Nifty 500"]
     ltp, pdc, day_pct = nifty500_basis.get("ltp"), nifty500_basis.get("pdc"), nifty500_basis.get("pct")
@@ -1276,7 +1194,7 @@ def cards(pairs, cols=3):
 st.subheader("📊 Live Market")
 basis = market.get("index_basis", {}) or {}
 basis_rows = []
-for _name in ["Nifty 50", "Nifty Next 50", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 500", "GIFT NIFTY"]:
+for _name in ["Nifty 50", "Nifty Next 50", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 500"]:
     _v = basis.get(_name, {})
     _pct = _v.get("pct")
     _direction = "🟢 BUY" if _pct is not None and float(_pct) > 0 else ("🔴 SELL" if _pct is not None and float(_pct) < 0 else "⚪ NOT ALIGNED")
