@@ -154,26 +154,30 @@ class DhanLiveClient:
 
     def post(self, path, payload):
         url = "https://api.dhan.co/v2" + path
-        for attempt in range(3):
-            response = requests.post(url, headers=self.headers, json=payload, timeout=15)
-            if response.status_code == 429 and attempt < 2:
-                time.sleep(2 ** attempt)
+        # A live dashboard must fail fast rather than queue old snapshots.
+        # Long HTTP retries can make a 15-second refresh display data from a
+        # much earlier scan cycle.
+        for attempt in range(2):
+            response = requests.post(url, headers=self.headers, json=payload, timeout=6)
+            if response.status_code == 429 and attempt < 1:
+                time.sleep(1)
                 continue
             response.raise_for_status()
             return response.json()
 
     def quotes(self, security_ids, exchange_segment="NSE_EQ"):
-        # Dhan expects numeric security IDs and the correct exchange-segment key.
-        # A valid Dhan ID can occasionally be omitted from a large quote response,
-        # so retry only missing IDs before declaring NO LTP.
+        # One fresh snapshot per dashboard cycle. Do not perform hundreds of
+        # serial retries: that makes the displayed price stale by the time the
+        # cycle completes. Dhan supports large multi-instrument snapshots, so
+        # request the whole NIFTY 500 once and return only that response.
         ids = list(dict.fromkeys(int(x) for x in security_ids))
         if not ids:
             return {}
 
-        def parse(data, requested):
+        def parse(data):
             rows = ((data.get("data") or {}).get(exchange_segment) or {})
             out = {}
-            for sid in requested:
+            for sid in ids:
                 row = rows.get(str(sid), rows.get(sid, {}))
                 ohlc = row.get("ohlc") or {}
                 ltp = row.get("last_price")
@@ -201,27 +205,7 @@ class DhanLiveClient:
                 }
             return out
 
-        result = parse(self.post("/marketfeed/ohlc", {exchange_segment: ids}), ids)
-        missing = [sid for sid in ids if sid not in result]
-
-        # Retry omitted IDs in smaller batches, then individually.
-        for start in range(0, len(missing), 50):
-            retry_ids = missing[start:start + 50]
-            result.update(parse(
-                self.post("/marketfeed/ohlc", {exchange_segment: retry_ids}),
-                retry_ids,
-            ))
-        missing = [sid for sid in ids if sid not in result]
-        for sid in missing:
-            try:
-                result.update(parse(
-                    self.post("/marketfeed/ohlc", {exchange_segment: [sid]}),
-                    [sid],
-                ))
-            except Exception:
-                pass
-        return result
-
+        return parse(self.post("/marketfeed/ohlc", {exchange_segment: ids}))
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_dhan_broad_index_ids():
     """Resolve required broad-market indices from Dhan's detailed security master.
@@ -460,6 +444,9 @@ def trend_check(state):
         # The worker will show the actual mapped universe and refuse new entries
         # until a complete 500-member state is available.
         st.error(f"Breadth universe incomplete: {len(unique_universe_ids)} mapped stocks loaded; expected 500.")
+    # Capture the quote-cycle time immediately before the Dhan request so the
+    # dashboard can expose snapshot freshness.
+    quote_requested_at = datetime.now(IST)
     live_quotes = {}
     quote_batch_size = 500
     for start in range(0, len(unique_universe_ids), quote_batch_size):
@@ -622,6 +609,7 @@ def trend_check(state):
         "live_quotes": live_quotes,
         "resolved_pdc": resolved_pdc,
         "dhan_quote_coverage_pct": (dhan_ltp_valid / len(coverage_ids) * 100) if coverage_ids else 0,
+        "quote_requested_at": quote_requested_at.strftime("%Y-%m-%d %H:%M:%S IST"),
     })
 
     if "trend_runtime" not in st.session_state:
