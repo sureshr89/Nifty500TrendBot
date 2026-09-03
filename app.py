@@ -563,6 +563,11 @@ def trend_check(state):
         "dhan_missing_details": dhan_missing_details,
         "dhan_pdc_valid": dhan_pdc_valid,
         "dhan_ad_valid": dhan_ad_valid,
+        # Expose the same universe and quote snapshot used by the live scan.
+        # The dashboard must not rebuild the universe independently.
+        "breadth_universe_rows": universe_rows,
+        "live_quotes": live_quotes,
+        "resolved_pdc": resolved_pdc,
         "dhan_quote_coverage_pct": (dhan_ltp_valid / len(coverage_ids) * 100) if coverage_ids else 0,
     })
 
