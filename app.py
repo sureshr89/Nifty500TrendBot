@@ -990,6 +990,22 @@ def trend_check(state):
                 runtime["last_ltp"][str(sid)] = q["ltp"]
                 continue
 
+            # New S1 directional gap filter: today's session open must be
+            # above the previous completed day's open for BUY, and below it for SELL.
+            try:
+                pdo = float(stock.get("PDO"))
+                today_open = float(q["open"])
+            except (TypeError, ValueError):
+                runtime["last_ltp"][str(sid)] = q["ltp"]
+                continue
+            open_filter_ok = (
+                (mode == "BUY" and today_open > pdo)
+                or (mode == "SELL" and today_open < pdo)
+            )
+            if not open_filter_ok:
+                runtime["last_ltp"][str(sid)] = q["ltp"]
+                continue
+
             inside_range = pdl < q["open"] < pdh
             if inside_range:
                 entry_diagnostics["inside_range"] += 1
