@@ -1279,21 +1279,36 @@ with st.expander("📡 Dhan Live Coverage — 15 Second Snapshot", expanded=Fals
 st.divider()
 with st.expander("🎯 S1 — Strategy Rules",expanded=False):
     rules=[
-        ["S1","BUY","Existing window","Open between PDL/PDH → cross PDH","PDL","1.25R","SL / Target / existing square-off"],
-        ["S1","SELL","Existing window","Open between PDL/PDH → cross PDL","PDH","1.25R","SL / Target / existing square-off"],
+        ["S1","BUY","09:15–13:00","Open between PDL/PDH → cross PDH","PDL","1:1","SL / Target / 14:55 square-off"],
+        ["S1","SELL","09:15–13:00","Open between PDL/PDH → cross PDL","PDH","1:1","SL / Target / 14:55 square-off"],
     ]
     st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Window","Exact Entry Condition","SL","Target","Exit"]),use_container_width=True,hide_index=True)
 
-# S1 LIVE ENTRY DIAGNOSTICS
+# S1 DRY-RUN CONTROL PANEL — visible so tomorrow's test takes only minutes.
 diag = market.get("entry_diagnostics", {})
+st.divider()
+st.subheader("🧪 S1 Dry-Run Control")
+st.caption("DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent from this dashboard.")
+
+trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 2) or 2)
+loss_limit_ok = float(diag.get("daily_realized_loss", 0) or 0) < float(diag.get("max_daily_loss", 3000) or 3000)
+open_limit_ok = int(diag.get("open_positions", 0) or 0) < int(diag.get("max_open_positions", 2) or 2)
+
+cards([
+    ("Mode", "🧪 DRY-RUN"),
+    ("Trades Today", f"{diag.get('trades_today', 0)} / {diag.get('max_trades_per_day', 2)}"),
+    ("Daily Loss", f"₹{float(diag.get('daily_realized_loss', 0) or 0):,.2f} / ₹{float(diag.get('max_daily_loss', 3000) or 3000):,.0f}"),
+    ("Open Positions", f"{diag.get('open_positions', 0)} / {diag.get('max_open_positions', 2)}"),
+    ("Trade Limit", "🟢 OK" if trade_limit_ok else "🔴 BLOCKED"),
+    ("Loss Limit", "🟢 OK" if loss_limit_ok else "🔴 BLOCKED"),
+    ("Position Limit", "🟢 OK" if open_limit_ok else "🔴 BLOCKED"),
+    ("New Entry Gate", "🟢 READY" if diag.get("daily_limits_ok") and diag.get("entry_window") and diag.get("breadth_ok") else "🔴 BLOCKED"),
+], 3)
+
 with st.expander("🔎 S1 Entry Diagnostics", expanded=False):
-    st.caption("Exact live gates for the current scan cycle; this does not change S1 logic.")
-    # Use the same mobile-safe card grid as the performance sections.
-    # The grid remains three cards across on narrow screens instead of
-    # Streamlit st.columns(4), which was stacking into one long column.
+    st.caption("Exact live-data gates for the current scan cycle. This panel does not send any broker order.")
     cards([
         ("Market Mode", str(diag.get("mode", "UNKNOWN"))),
-        ("Open Positions", f"{diag.get('open_positions', 0)} / {diag.get('max_open_positions', 4)}"),
         ("Candidates Checked", diag.get("candidates", 0)),
         ("Entries This Cycle", diag.get("entries_opened", 0)),
         ("Sector Aligned", diag.get("sector_aligned", 0)),
@@ -1303,7 +1318,8 @@ with st.expander("🔎 S1 Entry Diagnostics", expanded=False):
     ], 3)
     st.caption(
         f"Entry window: {'ACTIVE' if diag.get('entry_window') else 'CLOSED'} • "
-        f"Breadth: {'OK' if diag.get('breadth_ok') else 'BLOCKED'}"
+        f"Breadth: {'OK' if diag.get('breadth_ok') else 'BLOCKED'} • "
+        f"Daily limits: {'OK' if diag.get('daily_limits_ok') else 'BLOCKED'}"
     )
 
 # 3 TODAY PERFORMANCE — SUMMARY FIRST, TRADE TABLE SEPARATE COLLAPSE
