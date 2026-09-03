@@ -79,6 +79,27 @@ def load_full_nifty500_universe():
         missing_mask = nifty["SecurityId"].isna()
         nifty.loc[missing_mask, "SecurityId"] = nifty.loc[missing_mask, "Symbol"].map(symbol_mapping)
 
+    # Final controlled fallback for cases where Dhan's current master has
+    # non-standard/blank SERIES or INSTRUMENT metadata for an otherwise valid
+    # NSE cash-equity constituent (HFCL is one such example).
+    missing_mask = nifty["SecurityId"].isna()
+    if missing_mask.any() and "SEM_TRADING_SYMBOL" in master.columns:
+        broad = master[master["EXCH_ID"].astype(str).str.upper().eq("NSE")].copy()
+        broad["_SYMBOL"] = broad["SEM_TRADING_SYMBOL"].astype(str).str.upper().str.strip()
+        broad = broad[broad["_SYMBOL"].isin(nifty.loc[missing_mask, "Symbol"])]
+        if not broad.empty:
+            # Prefer a single candidate; otherwise prefer rows whose segment
+            # looks like cash equity. Ambiguous symbols are intentionally not mapped.
+            for idx in nifty.index[missing_mask]:
+                sym = nifty.at[idx, "Symbol"]
+                candidates = broad[broad["_SYMBOL"].eq(sym)].copy()
+                if len(candidates) > 1 and "SEGMENT" in candidates.columns:
+                    eq_candidates = candidates[candidates["SEGMENT"].astype(str).str.upper().eq("E")]
+                    if len(eq_candidates) == 1:
+                        candidates = eq_candidates
+                if len(candidates) == 1:
+                    nifty.at[idx, "SecurityId"] = candidates.iloc[0]["SECURITY_ID"]
+
     unresolved = nifty[nifty["SecurityId"].isna()]
     if not unresolved.empty:
         details = ", ".join(
