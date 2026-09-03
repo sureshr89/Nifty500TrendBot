@@ -25,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v14-5indices"
+APP_BUILD = "live-ltp-direct-v15-s1-open-filter-rr1-max2"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -473,7 +473,7 @@ def clean_trade_history(trades):
             if (strict_entry_ok and entry > 0 and qty > 0 and
                     cap <= 150000.0 + 1e-6 and
                     1000.0 - 1e-6 <= risk <= 1500.0 + 1e-6 and
-                    abs(rr - 1.25) < 1e-6):
+                    abs(rr - 1.0) < 1e-6):
                 cleaned.append(t)
         except Exception:
             pass
@@ -498,6 +498,7 @@ def trend_check(state):
                 "PDH": _row.get("PDH", _row.get("pdh")),
                 "PDL": _row.get("PDL", _row.get("pdl")),
                 "PDC": _row.get("PDC", _row.get("pdc")),
+                "PDO": _row.get("PDO", _row.get("pdo")),
             }
         except (TypeError, ValueError):
             continue
@@ -510,6 +511,7 @@ def trend_check(state):
             _row["PDH"] = _rng.get("PDH")
             _row["PDL"] = _rng.get("PDL")
             _row["PDC"] = _rng.get("PDC")
+            _row["PDO"] = _rng.get("PDO")
 
  # Quote eligibility must NOT depend on PDC.  A stock can still need a live
     # LTP in the BUY/SELL tables even if its saved state has no usable PDC.
@@ -864,7 +866,7 @@ def trend_check(state):
     # Every strategy may use ONLY the matching pre-qualified BUY/SELL stock set.
     # Never allow a new entry on incomplete breadth coverage.
     # This explicit check is kept here as a second safety gate even if mode logic changes.
-    MAX_OPEN_TRADES = 4
+    MAX_OPEN_TRADES = 2
     entry_diagnostics = {
         "entry_window": in_entry_window(dt),
         "breadth_ok": bool(breadth_valid and valid_count >= 480),
@@ -903,7 +905,7 @@ def trend_check(state):
 
         MIN_RISK_PER_TRADE = 1000.0
         MAX_RISK_PER_TRADE = 1500.0
-        TARGET_R_MULTIPLE = 1.25  # Reward = 1.25 × initial risk (RR 1:1.25)
+        TARGET_R_MULTIPLE = 1.0  # Reward = 1 × initial risk (RR 1:1)
 
         def open_position(strategy, side, stock, sid, entry, sl, target):
             # S1 is a strict level-entry strategy. Live LTP only TRIGGERS the
@@ -1028,7 +1030,7 @@ def trend_check(state):
             if entry_made:
                 entry_diagnostics["entries_opened"] += 1
 
-            # Do not stop after the first entry. S1 allows up to four
+            # Do not stop after the first entry. S1 allows up to two
             # simultaneous open positions, so continue evaluating candidates
             # until the limit is reached.
             if entry_made and len([t for t in trades if t.get("status") == "OPEN"]) >= MAX_OPEN_TRADES:
@@ -1042,7 +1044,7 @@ def trend_check(state):
     for _row in state.get("classified", []) or []:
         try:
             _sid = int(_row.get("SecurityId"))
-            range_by_id[_sid] = (_row.get("PDH", _row.get("pdh")), _row.get("PDL", _row.get("pdl")))
+            range_by_id[_sid] = (_row.get("PDH", _row.get("pdh")), _row.get("PDL", _row.get("pdl")), _row.get("PDO", _row.get("pdo")))
         except (TypeError, ValueError):
             pass
     for _row in universe_rows:
