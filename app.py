@@ -1113,7 +1113,9 @@ with st.expander("🏢 Sector A/D",expanded=False):
 
 # 7 FULL NIFTY 500 LIVE DATA - COLLAPSIBLE
 # trend_check owns the one shared 15-second quote scan; read its returned snapshot.
-dashboard_universe_rows = market.get("breadth_universe_rows")\nif not dashboard_universe_rows:\n    dashboard_universe_rows = []
+dashboard_universe_rows = market.get("breadth_universe_rows")
+if not dashboard_universe_rows:
+    dashboard_universe_rows = []
 dashboard_live_quotes = market.get("live_quotes", {})
 dashboard_resolved_pdc = market.get("resolved_pdc", {})
 st.divider()
