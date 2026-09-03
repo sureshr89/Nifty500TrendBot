@@ -524,11 +524,21 @@ def trend_check(state):
         if (_sid in live_quotes and live_quotes[_sid].get("ltp") is not None and float(live_quotes[_sid].get("ltp") or 0) > 0)
     )
     dhan_ltp_missing = max(0, len(coverage_ids) - dhan_ltp_valid)
-    dhan_missing_details = [
-        {"Symbol": str(row.get("Symbol", "")), "Company": str(row.get("Company", "")), "SecurityId": int(row.get("SecurityId"))}
-        for row in full_universe
-        if int(row.get("SecurityId")) in coverage_ids and int(row.get("SecurityId")) not in live_quotes
-    ]
+    # Keep the exact NSE identity for every Dhan quote failure so a missing
+    # LTP can never be hidden behind a simple count such as 499/500.
+    dhan_missing_details = []
+    for row in universe_rows:
+        try:
+            sid = int(row.get("SecurityId"))
+        except (TypeError, ValueError):
+            continue
+        if sid in coverage_ids and sid not in live_quotes:
+            dhan_missing_details.append({
+                "Symbol": str(row.get("Symbol", "")),
+                "Company": str(row.get("Company", "")),
+                "SecurityId": sid,
+                "Reason": "Dhan returned no valid LTP after batch and individual retries",
+            })
     dhan_pdc_valid = sum(1 for _sid in coverage_ids if _sid in resolved_pdc and resolved_pdc[_sid] is not None)
     dhan_ad_valid = valid_count
     market.update({
