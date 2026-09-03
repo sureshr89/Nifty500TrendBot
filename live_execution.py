@@ -64,11 +64,18 @@ class DhanExecutionClient:
         sid=str(int(sid)); active={"TRANSIT","PENDING","PART_TRADED","TRIGGERED","INACTIVE"}
         if any(str(o.get("securityId",""))==sid and str(o.get("orderStatus","")).upper() in active for o in self.orders()): return True
         return bool(self.active_bot_positions({sid}))
-    def place_super_order(self,sid,side,quantity,entry,target,stop,cid):
+    def assert_capacity(self, owned_ids):
+        active=self.active_bot_positions(owned_ids)
+        if len(active)>=MAX_OPEN_POSITIONS: raise LiveSafetyError(f"Maximum {MAX_OPEN_POSITIONS} live bot positions reached")
+        return active
+    def place_super_order(self,sid,side,quantity,entry,target,stop,cid,owned_ids):
         if force_exit_due(): raise LiveSafetyError("Force-exit time reached")
         if not in_entry_window(): raise LiveSafetyError("Outside entry window")
+        self.assert_capacity(owned_ids)
         if self.has_pending_or_open_for_security(sid): raise LiveSafetyError("Duplicate/open/pending order blocked")
         return self.request("POST","/super/orders",{"dhanClientId":self.client_id,"correlationId":cid,"transactionType":side,"exchangeSegment":"NSE_EQ","productType":"INTRADAY","orderType":"LIMIT","securityId":str(int(sid)),"quantity":int(quantity),"price":float(entry),"targetPrice":float(target),"stopLossPrice":float(stop),"trailingJump":0.0})
+    def get_order_by_correlation(self,cid):
+        return self.request("GET",f"/orders/external/{cid}")
     def confirm_super_order(self,order_id,timeout_seconds=20):
         deadline=time.time()+timeout_seconds; terminal={"REJECTED","CANCELLED","EXPIRED"}
         while time.time()<deadline:
