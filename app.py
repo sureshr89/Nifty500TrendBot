@@ -105,34 +105,62 @@ class DhanLiveClient:
 
     def quotes(self, security_ids, exchange_segment="NSE_EQ"):
         # Dhan expects numeric security IDs and the correct exchange-segment key.
-        ids = [int(x) for x in security_ids]
+        # A valid Dhan ID can occasionally be omitted from a large quote response,
+        # so retry only missing IDs before declaring NO LTP.
+        ids = list(dict.fromkeys(int(x) for x in security_ids))
         if not ids:
             return {}
-        data = self.post("/marketfeed/ohlc", {exchange_segment: ids})
-        rows = ((data.get("data") or {}).get(exchange_segment) or {})
-        result = {}
-        for sid in ids:
-            row = rows.get(str(sid), rows.get(sid, {}))
-            ohlc = row.get("ohlc") or {}
-            ltp = row.get("last_price")
-            if ltp is None:
-                continue
-            previous_close = row.get("previous_close")
-            if previous_close is None:
-                previous_close = row.get("prev_close")
-            if previous_close is None:
-                previous_close = ohlc.get("previous_close")
-            # Dhan OHLC commonly exposes the previous/session close as
-            # ohlc.close; use it as the final PDC fallback.
-            if previous_close is None:
-                previous_close = ohlc.get("close")
-            result[int(sid)] = {
-                "ltp": float(ltp),
-                "open": float(ohlc.get("open", ltp)),
-                "high": float(ohlc.get("high", ltp)),
-                "low": float(ohlc.get("low", ltp)),
-                "previous_close": float(previous_close) if previous_close not in (None, "") else None,
-            }
+
+        def parse(data, requested):
+            rows = ((data.get("data") or {}).get(exchange_segment) or {})
+            out = {}
+            for sid in requested:
+                row = rows.get(str(sid), rows.get(sid, {}))
+                ohlc = row.get("ohlc") or {}
+                ltp = row.get("last_price")
+                if ltp in (None, ""):
+                    continue
+                try:
+                    ltp = float(ltp)
+                except (TypeError, ValueError):
+                    continue
+                if ltp <= 0:
+                    continue
+                previous_close = row.get("previous_close")
+                if previous_close is None:
+                    previous_close = row.get("prev_close")
+                if previous_close is None:
+                    previous_close = ohlc.get("previous_close")
+                if previous_close is None:
+                    previous_close = ohlc.get("close")
+                out[int(sid)] = {
+                    "ltp": ltp,
+                    "open": float(ohlc.get("open", ltp)),
+                    "high": float(ohlc.get("high", ltp)),
+                    "low": float(ohlc.get("low", ltp)),
+                    "previous_close": float(previous_close) if previous_close not in (None, "") else None,
+                }
+            return out
+
+        result = parse(self.post("/marketfeed/ohlc", {exchange_segment: ids}), ids)
+        missing = [sid for sid in ids if sid not in result]
+
+        # Retry omitted IDs in smaller batches, then individually.
+        for start in range(0, len(missing), 50):
+            retry_ids = missing[start:start + 50]
+            result.update(parse(
+                self.post("/marketfeed/ohlc", {exchange_segment: retry_ids}),
+                retry_ids,
+            ))
+        missing = [sid for sid in ids if sid not in result]
+        for sid in missing:
+            try:
+                result.update(parse(
+                    self.post("/marketfeed/ohlc", {exchange_segment: [sid]}),
+                    [sid],
+                ))
+            except Exception:
+                pass
         return result
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -496,6 +524,11 @@ def trend_check(state):
         if (_sid in live_quotes and live_quotes[_sid].get("ltp") is not None and float(live_quotes[_sid].get("ltp") or 0) > 0)
     )
     dhan_ltp_missing = max(0, len(coverage_ids) - dhan_ltp_valid)
+    dhan_missing_details = [
+        {"Symbol": str(row.get("Symbol", "")), "Company": str(row.get("Company", "")), "SecurityId": int(row.get("SecurityId"))}
+        for row in full_universe
+        if int(row.get("SecurityId")) in coverage_ids and int(row.get("SecurityId")) not in live_quotes
+    ]
     dhan_pdc_valid = sum(1 for _sid in coverage_ids if _sid in resolved_pdc and resolved_pdc[_sid] is not None)
     dhan_ad_valid = valid_count
     market.update({
@@ -511,6 +544,7 @@ def trend_check(state):
         "dhan_universe_total": len(coverage_ids),
         "dhan_ltp_valid": dhan_ltp_valid,
         "dhan_ltp_missing": dhan_ltp_missing,
+        "dhan_missing_details": dhan_missing_details,
         "dhan_pdc_valid": dhan_pdc_valid,
         "dhan_ad_valid": dhan_ad_valid,
         "dhan_quote_coverage_pct": (dhan_ltp_valid / len(coverage_ids) * 100) if coverage_ids else 0,
@@ -896,9 +930,13 @@ with st.expander("📡 Dhan Live Coverage — 15 Second Snapshot", expanded=Fals
         ("Used for A/D", f"{market.get('dhan_ad_valid',0)}"),
     ])
     st.caption(
-        "This section is calculated from the same Dhan live quote batch used for "
-        "A/D, Sector A/D, trade monitoring and live P&L. No extra market scan is performed."
+        "This section uses the same Dhan live quote batch as A/D, Sector A/D, "
+        "trade monitoring and live P&L. Missing IDs are retried in smaller batches and individually."
     )
+    _missing = market.get("dhan_missing_details", []) or []
+    if _missing:
+        st.caption("Dhan returned no live LTP after retries for:")
+        st.dataframe(pd.DataFrame(_missing), use_container_width=True, hide_index=True)
 
 # 2 STRATEGY REFERENCE - COLLAPSIBLE
 st.divider()
