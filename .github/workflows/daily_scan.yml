@@ -51,8 +51,10 @@ jobs:
           breadth = state.get("breadth_universe") or []
           strategy_coverage = int(health.get("strategy_coverage", len(state.get("classified") or [])) or 0)
 
-          if len(breadth) != 500:
-              raise SystemExit(f"Invalid breadth universe: expected 500, got {len(breadth)}")
+          # Allow a temporary Dhan mapping gap when coverage remains above the
+          # same 480-stock safety threshold used by the live trading bot.
+          if len(breadth) < 480:
+              raise SystemExit(f"Invalid breadth universe: expected at least 480 mapped stocks, got {len(breadth)}")
           if set(index_basis) != required:
               missing = sorted(required - set(index_basis))
               extra = sorted(set(index_basis) - required)
