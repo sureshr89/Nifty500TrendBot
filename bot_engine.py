@@ -56,8 +56,29 @@ def load_nifty500_universe():
         & master["SERIES"].astype(str).str.upper().eq("EQ")
     ].copy()
     equity["ISIN"] = equity["ISIN"].astype(str).str.upper().str.strip()
+    # Primary mapping: official NSE ISIN -> Dhan Security ID.
     mapping = equity.drop_duplicates("ISIN").set_index("ISIN")["SECURITY_ID"].to_dict()
     nifty["SecurityId"] = nifty["ISIN Code"].map(mapping)
+
+    # Fallback mapping: some Dhan master rows can have missing/non-matching
+    # ISIN metadata even though the NSE equity is present. Match the official
+    # NSE symbol against the Dhan symbol column before declaring it unmapped.
+    nifty["Symbol"] = nifty["Symbol"].astype(str).str.upper().str.strip()
+    dhan_symbol_col = next(
+        (c for c in ["SYMBOL_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "UNDERLYING_SYMBOL"]
+         if c in equity.columns),
+        None,
+    )
+    if dhan_symbol_col:
+        equity["_NIFTY_SYMBOL"] = equity[dhan_symbol_col].astype(str).str.upper().str.strip()
+        symbol_mapping = (
+            equity.dropna(subset=["_NIFTY_SYMBOL", "SECURITY_ID"])
+            .drop_duplicates("_NIFTY_SYMBOL")
+            .set_index("_NIFTY_SYMBOL")["SECURITY_ID"]
+            .to_dict()
+        )
+        missing_sid = nifty["SecurityId"].isna()
+        nifty.loc[missing_sid, "SecurityId"] = nifty.loc[missing_sid, "Symbol"].map(symbol_mapping)
 
     # Keep the scanner resilient to a temporary Dhan master mismatch.
     # One unmapped official constituent (currently HFCL) must not stop the
