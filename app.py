@@ -24,7 +24,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_PDH_PDL_RR125_V4"
 
-APP_BUILD = "mandatory-5index-basis-v6-dhan-master-fix"
+APP_BUILD = "live-ltp-direct-v7"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -182,46 +182,33 @@ class DhanLiveClient:
             return response.json()
 
     def quotes(self, security_ids, exchange_segment="NSE_EQ"):
-        # One fresh snapshot per dashboard cycle. Do not perform hundreds of
-        # serial retries: that makes the displayed price stale by the time the
-        # cycle completes. Dhan supports large multi-instrument snapshots, so
-        # request the whole NIFTY 500 once and return only that response.
+        """Fetch a fresh LTP snapshot for the whole universe in one request.
+
+        The LTP endpoint is the lightest Dhan market snapshot and is therefore
+        preferred for the 500-stock live dashboard. OHLC is deliberately not
+        used for the refresh path because the strategy already carries PDH/PDL/
+        PDC from the pre-market state; requesting heavier OHLC payloads was
+        increasing refresh latency.
+        """
         ids = list(dict.fromkeys(int(x) for x in security_ids))
         if not ids:
             return {}
 
-        def parse(data):
-            rows = ((data.get("data") or {}).get(exchange_segment) or {})
-            out = {}
-            for sid in ids:
-                row = rows.get(str(sid), rows.get(sid, {}))
-                ohlc = row.get("ohlc") or {}
-                ltp = row.get("last_price")
-                if ltp in (None, ""):
-                    continue
-                try:
-                    ltp = float(ltp)
-                except (TypeError, ValueError):
-                    continue
-                if ltp <= 0:
-                    continue
-                previous_close = row.get("previous_close")
-                if previous_close is None:
-                    previous_close = row.get("prev_close")
-                if previous_close is None:
-                    previous_close = ohlc.get("previous_close")
-                if previous_close is None:
-                    previous_close = ohlc.get("close")
-                out[int(sid)] = {
-                    "ltp": ltp,
-                    "open": float(ohlc.get("open", ltp)),
-                    "high": float(ohlc.get("high", ltp)),
-                    "low": float(ohlc.get("low", ltp)),
-                    "previous_close": float(previous_close) if previous_close not in (None, "") else None,
-                }
-            return out
+        data = self.post("/marketfeed/ltp", {exchange_segment: ids})
+        rows = ((data.get("data") or {}).get(exchange_segment) or {})
+        out = {}
+        for sid in ids:
+            row = rows.get(str(sid), rows.get(sid, {}))
+            ltp = row.get("last_price")
+            try:
+                ltp = float(ltp)
+            except (TypeError, ValueError):
+                continue
+            if ltp <= 0:
+                continue
+            out[int(sid)] = {"ltp": ltp}
+        return out
 
-        return parse(self.post("/marketfeed/ohlc", {exchange_segment: ids}))
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_dhan_broad_index_ids():
     """Resolve required broad-market indices from Dhan's detailed security master.
@@ -460,8 +447,8 @@ def trend_check(state):
         # The worker will show the actual mapped universe and refuse new entries
         # until a complete 500-member state is available.
         st.error(f"Breadth universe incomplete: {len(unique_universe_ids)} mapped stocks loaded; expected 500.")
-    # Capture the quote-cycle time immediately before the Dhan request so the
-    # dashboard can expose snapshot freshness.
+    # Record request and response times so the dashboard never presents an
+    # old cycle as "live". Each rerun requests a new LTP snapshot from Dhan.
     quote_requested_at = datetime.now(IST)
     live_quotes = {}
     quote_batch_size = 500
@@ -470,6 +457,8 @@ def trend_check(state):
         live_quotes.update(
             client.quotes(quote_batch, exchange_segment="NSE_EQ")
         )
+
+    quote_received_at = datetime.now(IST)
 
     # Populate BUY/SELL table LTP from the same quote batch.
     for stock in buy_rows + sell_rows:
@@ -626,6 +615,8 @@ def trend_check(state):
         "resolved_pdc": resolved_pdc,
         "dhan_quote_coverage_pct": (dhan_ltp_valid / len(coverage_ids) * 100) if coverage_ids else 0,
         "quote_requested_at": quote_requested_at.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "quote_received_at": quote_received_at.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "quote_latency_seconds": round((quote_received_at - quote_requested_at).total_seconds(), 3),
     })
 
     if "trend_runtime" not in st.session_state:
