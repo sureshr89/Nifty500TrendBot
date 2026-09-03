@@ -58,10 +58,19 @@ def load_nifty500_universe():
     equity["ISIN"] = equity["ISIN"].astype(str).str.upper().str.strip()
     mapping = equity.drop_duplicates("ISIN").set_index("ISIN")["SECURITY_ID"].to_dict()
     nifty["SecurityId"] = nifty["ISIN Code"].map(mapping)
+
+    # Keep the scanner resilient to a temporary Dhan master mismatch.
+    # One unmapped official constituent (currently HFCL) must not stop the
+    # entire pre-market scan; the main app uses the same 480-stock coverage
+    # safety threshold before allowing new trades.
     nifty = nifty.dropna(subset=["SecurityId"]).copy()
     nifty["SecurityId"] = nifty["SecurityId"].astype(int)
-    if len(nifty) != 500:
-        raise RuntimeError(f"NIFTY 500 mapping incomplete: expected 500, got {len(nifty)}")
+    nifty = nifty.drop_duplicates(subset=["SecurityId"]).copy()
+
+    if len(nifty) < 480:
+        raise RuntimeError(
+            f"NIFTY 500 Dhan mapping coverage too low for scan: expected at least 480, got {len(nifty)}"
+        )
 
     nifty["Symbol"] = nifty["Symbol"].astype(str).str.upper().str.strip()
     sector = nifty["Industry"].fillna("Other").astype(str) if "Industry" in nifty.columns else "Other"
