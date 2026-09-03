@@ -316,6 +316,9 @@ def load_dhan_broad_index_ids():
         "Nifty Midcap 150": ["NIFTY MIDCAP 150", "NIFTY MIDCAP150"],
         "Nifty Smallcap 250": ["NIFTY SMALLCAP 250", "NIFTY SMALLCAP250"],
         "Nifty 500": ["NIFTY 500"],
+        # GIFT NIFTY naming can vary in Dhan\'s master; resolve dynamically
+        # instead of hard-coding a Security ID.
+        "GIFT NIFTY": ["GIFT NIFTY", "GIFTNIFTY"],
     }
 
     # Build one normalized name per searchable column. Prefer rows explicitly
@@ -356,7 +359,21 @@ def load_dhan_broad_index_ids():
                     break
         if hit is None:
             raise RuntimeError(f"Dhan index Security ID not found for {label} in current Dhan security master")
-        out[label] = int(hit["SECURITY_ID"])
+        # Store both Security ID and the exchange segment. The five NSE
+        # indices use IDX_I, while GIFT NIFTY may be represented differently
+        # in Dhan's current master.
+        exch = str(hit.get("EXCH_ID", "")).upper().strip()
+        seg = str(hit.get("SEGMENT", "")).upper().strip()
+        if seg in ("I", "IDX", "INDEX", "NSE_IDX"):
+            api_segment = "IDX_I"
+        elif exch == "NSE" and seg in ("D", "FNO", "NFO"):
+            api_segment = "NSE_FNO"
+        elif exch == "BSE" and seg in ("D", "FNO", "BFO"):
+            api_segment = "BSE_FNO"
+        else:
+            # Most index-like rows in Dhan are queried through IDX_I.
+            api_segment = "IDX_I"
+        out[label] = {"security_id": int(hit["SECURITY_ID"]), "exchange_segment": api_segment}
     return out
 
 def now_ist():
@@ -648,8 +665,22 @@ def trend_check(state):
     # Use the same authoritative LTP + net_change basis for the five indices.
     # Verify all five on every refresh and retry only an index for which Dhan
     # did not return a valid LTP in the first response.
-    required_index_ids = list(dict.fromkeys(int(x) for x in index_ids.values()))
-    index_quotes = client.quotes_with_change(required_index_ids, exchange_segment="IDX_I")
+    # Fetch all six indices using the exchange segment resolved from Dhan's
+    # current security master. This keeps GIFT NIFTY dynamic and avoids a
+    # guessed/hard-coded Security ID.
+    index_requests = {}
+    for name, meta in index_ids.items():
+        sid = int(meta["security_id"])
+        segment = meta["exchange_segment"]
+        index_requests.setdefault(segment, []).append(sid)
+
+    index_quotes = {}
+    for segment, ids in index_requests.items():
+        index_quotes.update(client.quotes_with_change(ids, exchange_segment=segment))
+
+    required_index_ids = list(dict.fromkeys(
+        int(meta["security_id"]) for meta in index_ids.values()
+    ))
     missing_index_ids = [
         sid for sid in required_index_ids
         if sid not in index_quotes
@@ -657,9 +688,11 @@ def trend_check(state):
         or float(index_quotes[sid].get("ltp") or 0) <= 0
     ]
     if missing_index_ids:
-        index_quotes.update(
-            client.quotes_with_change(missing_index_ids, exchange_segment="IDX_I")
-        )
+        for segment, ids in index_requests.items():
+            retry_ids = [sid for sid in ids if sid in missing_index_ids]
+            if retry_ids:
+                index_quotes.update(client.quotes_with_change(retry_ids, exchange_segment=segment))
+
     final_missing_index_ids = [
         sid for sid in required_index_ids
         if sid not in index_quotes
@@ -667,13 +700,20 @@ def trend_check(state):
         or float(index_quotes[sid].get("ltp") or 0) <= 0
     ]
     index_basis = {}
-    for name, sid in index_ids.items():
-        q = index_quotes.get(int(sid), {})
+    for name, meta in index_ids.items():
+        sid = int(meta["security_id"])
+        q = index_quotes.get(sid, {})
         idx_ltp, idx_pdc = q.get("ltp"), q.get("previous_close")
         pct = None
         if idx_ltp is not None and idx_pdc not in (None, 0):
             pct = (float(idx_ltp) - float(idx_pdc)) / float(idx_pdc) * 100
-        index_basis[name] = {"security_id": int(sid), "ltp": idx_ltp, "pdc": idx_pdc, "pct": pct}
+        index_basis[name] = {
+            "security_id": sid,
+            "exchange_segment": meta["exchange_segment"],
+            "ltp": idx_ltp,
+            "pdc": idx_pdc,
+            "pct": pct,
+        }
 
     nifty500_basis = index_basis["Nifty 500"]
     ltp, pdc, day_pct = nifty500_basis.get("ltp"), nifty500_basis.get("pdc"), nifty500_basis.get("pct")
