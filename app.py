@@ -9,6 +9,7 @@ import math
 import json
 import time
 import base64
+import os
 from datetime import datetime
 from io import StringIO
 from zoneinfo import ZoneInfo
@@ -24,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v9-gift-global"
+APP_BUILD = "live-ltp-direct-v10-gift-v3"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -374,60 +375,80 @@ def load_dhan_broad_index_ids():
     return out
 
 def load_gift_nifty_quote():
-    """Fetch GIFT NIFTY from Upstox Global Instruments when configured.
+    """Fetch GIFT NIFTY LTP and previous close from Upstox Global Index API."""
+    # Prefer Streamlit secret, with environment-variable fallback for deployments.
+    token = None
+    try:
+        token = st.secrets.get("UPSTOX_ACCESS_TOKEN")
+    except Exception:
+        token = None
+    token = token or os.getenv("UPSTOX_ACCESS_TOKEN")
 
-    Dhan's documented API exchange-segment list does not expose an NSE IX/GIFT
-    segment, so GIFT NIFTY must not be forced through IDX_I. Upstox explicitly
-    supports GIFT NIFTY as GLOBAL_INDEX|SGX NIFTY.
-    """
-    token = st.secrets.get("UPSTOX_ACCESS_TOKEN")
     if not token:
-        return {"ltp": None, "previous_close": None, "pct": None,
-                "status": "UPSTOX_ACCESS_TOKEN missing"}
+        return {
+            "ltp": None, "previous_close": None, "pct": None,
+            "status": "UPSTOX_ACCESS_TOKEN missing — configure Streamlit secret",
+        }
 
     try:
-        headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {token}",
-        }
-        params = {"instrument_key": "GLOBAL_INDEX|SGX NIFTY"}
+        key = "GLOBAL_INDEX|SGX NIFTY"
         r = requests.get(
-            "https://api.upstox.com/v2/market-quote/quotes",
-            headers=headers,
-            params=params,
+            "https://api.upstox.com/v3/market-quote/ltp",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            params={"instrument_key": key},
             timeout=10,
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            return {
+                "ltp": None, "previous_close": None, "pct": None,
+                "status": f"Upstox HTTP {r.status_code}: {r.text[:180]}",
+            }
+
         data = r.json().get("data") or {}
-        row = data.get("GLOBAL_INDEX|SGX NIFTY") or next(iter(data.values()), {})
-        ltp = row.get("last_price")
-        try:
-            ltp = float(ltp)
-        except (TypeError, ValueError):
-            return {"ltp": None, "previous_close": None, "pct": None,
-                    "status": "invalid GIFT NIFTY response"}
+        row = data.get(key)
+        if not row:
+            # API response keys can be normalized; only accept a row explicitly
+            # identified as the requested global instrument.
+            row = next(
+                (v for v in data.values()
+                 if str(v.get("instrument_token", "")) == key),
+                None,
+            )
+        if not isinstance(row, dict):
+            return {
+                "ltp": None, "previous_close": None, "pct": None,
+                "status": "Upstox returned no GIFT NIFTY quote",
+            }
 
-        pdc = row.get("prev_close")
-        if pdc is None:
-            pdc = row.get("previous_close")
         try:
-            pdc = float(pdc) if pdc not in (None, "") else None
-        except (TypeError, ValueError):
-            pdc = None
+            ltp = float(row["last_price"])
+            pdc = float(row["cp"])
+        except (KeyError, TypeError, ValueError):
+            return {
+                "ltp": None, "previous_close": None, "pct": None,
+                "status": "Upstox quote missing last_price/cp",
+            }
 
-        pct = None
-        if pdc and pdc > 0:
-            pct = (ltp - pdc) / pdc * 100.0
-        elif row.get("net_change") not in (None, ""):
-            try:
-                pct = float(row.get("net_change_percent"))
-            except (TypeError, ValueError):
-                pass
-        return {"ltp": ltp, "previous_close": pdc, "pct": pct, "status": "LIVE"}
+        pct = ((ltp - pdc) / pdc * 100.0) if pdc > 0 else None
+        return {
+            "ltp": ltp,
+            "previous_close": pdc,
+            "pct": pct,
+            "status": "LIVE",
+        }
+    except requests.RequestException as e:
+        return {
+            "ltp": None, "previous_close": None, "pct": None,
+            "status": f"Upstox request failed: {type(e).__name__}",
+        }
     except Exception as e:
-        return {"ltp": None, "previous_close": None, "pct": None,
-                "status": f"GIFT NIFTY fetch failed: {type(e).__name__}"}
-
+        return {
+            "ltp": None, "previous_close": None, "pct": None,
+            "status": f"GIFT NIFTY parsing failed: {type(e).__name__}",
+        }
 
 def now_ist():
     return datetime.now(IST)
