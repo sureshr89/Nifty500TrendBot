@@ -22,7 +22,7 @@ IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
-STRATEGY_STATE_VERSION = "S1_PDH_PDL_RR125_V4"
+STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
 APP_BUILD = "live-ltp-direct-v7"
 
@@ -447,9 +447,17 @@ def clean_trade_history(trades):
             cap = entry * qty
             risk = rps * qty
             target = float(t.get("target"))
-            reward = (target - entry) if t.get("side") == "BUY" else (entry - target)
+            pdh = float(t.get("PDH"))
+            pdl = float(t.get("PDL"))
+            reward = (target - entry) if side == "BUY" else (entry - target)
             rr = reward / rps if rps > 0 else -1
-            if (entry > 0 and qty > 0 and cap <= 150000.0 + 1e-6 and
+            strict_entry_ok = (
+                (side == "BUY" and abs(entry - pdh) < 1e-6 and abs(sl - pdl) < 1e-6)
+                or
+                (side == "SELL" and abs(entry - pdl) < 1e-6 and abs(sl - pdh) < 1e-6)
+            )
+            if (strict_entry_ok and entry > 0 and qty > 0 and
+                    cap <= 150000.0 + 1e-6 and
                     1000.0 - 1e-6 <= risk <= 1500.0 + 1e-6 and
                     abs(rr - 1.25) < 1e-6):
                 cleaned.append(t)
@@ -861,8 +869,11 @@ def trend_check(state):
         MAX_RISK_PER_TRADE = 1500.0
         TARGET_R_MULTIPLE = 1.25  # Reward = 1.25 × initial risk (RR 1:1.25)
 
-        def open_position(strategy, side, stock, sid, q, sl, target):
-            entry = float(q["ltp"])
+        def open_position(strategy, side, stock, sid, entry, sl, target):
+            # S1 is a strict level-entry strategy. Live LTP only TRIGGERS the
+            # crossing; the recorded/strategy entry is exactly PDH for BUY
+            # and exactly PDL for SELL.
+            entry = float(entry)
             risk_per_share = (entry - sl) if side == "BUY" else (sl - entry)
             if risk_per_share <= 0:
                 return False
@@ -950,18 +961,32 @@ def trend_check(state):
                     entry_diagnostics["cross_detected"] += 1
                 s1 = inside_range and crossed
                 if s1:
-                    sl=pdl; risk=q["ltp"]-sl
-                    if risk>0:
-                        entry_made=open_position("S1","BUY",stock,sid,q,sl,q["ltp"]+TARGET_R_MULTIPLE*risk)
+                    # BUY: LTP crossing PDH is only the trigger.
+                    # Strategy entry = PDH; SL = PDL.
+                    entry = pdh
+                    sl = pdl
+                    risk = entry - sl
+                    if risk > 0:
+                        target = entry + TARGET_R_MULTIPLE * risk
+                        entry_made = open_position(
+                            "S1", "BUY", stock, sid, entry, sl, target
+                        )
             else:
                 crossed = prev_ltp is not None and prev_ltp > pdl and q["ltp"] <= pdl
                 if crossed:
                     entry_diagnostics["cross_detected"] += 1
                 s1=inside_range and crossed
                 if s1:
-                    sl=pdh; risk=sl-q["ltp"]
-                    if risk>0:
-                        entry_made=open_position("S1","SELL",stock,sid,q,sl,q["ltp"]-TARGET_R_MULTIPLE*risk)
+                    # SELL: LTP crossing PDL is only the trigger.
+                    # Strategy entry = PDL; SL = PDH.
+                    entry = pdl
+                    sl = pdh
+                    risk = sl - entry
+                    if risk > 0:
+                        target = entry - TARGET_R_MULTIPLE * risk
+                        entry_made = open_position(
+                            "S1", "SELL", stock, sid, entry, sl, target
+                        )
             if s1 and not entry_made:
                 entry_diagnostics["sizing_rejected"] += 1
             if entry_made:
