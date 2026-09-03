@@ -1,6 +1,6 @@
 """Professional fail-closed Dhan live execution layer for NIFTY 500 S1."""
 from __future__ import annotations
-import math, os, time, uuid
+import math, os, time
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -33,7 +33,9 @@ def in_entry_window(now=None):
 def force_exit_due(now=None):
     return (now or datetime.now(IST)).strftime("%H:%M") >= FORCE_EXIT_TIME
 def correlation_id(security_id, side):
-    return f"S1-{datetime.now(IST):%y%m%d}-{security_id}-{side[0]}-{uuid.uuid4().hex[:5]}"
+    # Deterministic for the trading day: restart-safe duplicate protection.
+    # If the process restarts, the same stock/side resolves to the same ID.
+    return f"S1-{datetime.now(IST):%y%m%d}-{int(security_id)}-{str(side).upper()[0]}"
 
 class DhanExecutionClient:
     def __init__(self):
@@ -68,25 +70,44 @@ class DhanExecutionClient:
         active=self.active_bot_positions(owned_ids)
         if len(active)>=MAX_OPEN_POSITIONS: raise LiveSafetyError(f"Maximum {MAX_OPEN_POSITIONS} live bot positions reached")
         return active
+    def cancel_super_order_entry(self, order_id):
+        return self.request("DELETE", f"/super/orders/{order_id}/ENTRY_LEG")
+
     def place_super_order(self,sid,side,quantity,entry,target,stop,cid,owned_ids):
         if force_exit_due(): raise LiveSafetyError("Force-exit time reached")
         if not in_entry_window(): raise LiveSafetyError("Outside entry window")
+        # Restart-safe idempotency: query correlation ID before any new order.
+        existing = self.get_order_by_correlation(cid)
+        if existing:
+            return existing
         self.assert_capacity(owned_ids)
         if self.has_pending_or_open_for_security(sid): raise LiveSafetyError("Duplicate/open/pending order blocked")
         return self.request("POST","/super/orders",{"dhanClientId":self.client_id,"correlationId":cid,"transactionType":side,"exchangeSegment":"NSE_EQ","productType":"INTRADAY","orderType":"LIMIT","securityId":str(int(sid)),"quantity":int(quantity),"price":float(entry),"targetPrice":float(target),"stopLossPrice":float(stop),"trailingJump":0.0})
     def get_order_by_correlation(self,cid):
         return self.request("GET",f"/orders/external/{cid}")
-    def confirm_super_order(self,order_id,timeout_seconds=20):
+    def confirm_super_order(self,order_id,timeout_seconds=30):
+        # Never mark a trade open merely because Dhan accepted the request.
         deadline=time.time()+timeout_seconds; terminal={"REJECTED","CANCELLED","EXPIRED"}
+        last=None
         while time.time()<deadline:
             for o in self.super_orders():
                 if str(o.get("orderId"))==str(order_id):
-                    status=str(o.get("orderStatus","")).upper()
+                    last=o; status=str(o.get("orderStatus","")).upper()
                     if status in terminal: raise LiveSafetyError(f"Order ended {status}: {o}")
-                    return o
+                    filled=int(o.get("filledQty",0) or 0)
+                    if status=="TRADED" and filled>0: return o
             time.sleep(1)
-        raise LiveSafetyError("Unable to confirm super order")
+        if last and str(last.get("orderStatus","")).upper() in {"PENDING","TRANSIT","PART_TRADED"}:
+            # Do not leave an entry order working after our confirmation timeout.
+            try: self.cancel_super_order_entry(order_id)
+            except Exception: pass
+        raise LiveSafetyError(f"Entry was not fully filled and confirmed within {timeout_seconds}s")
+
     def exit_all_intraday_safely(self,owned_ids):
+        # Dhan's endpoint exits ALL account positions/orders. Refuse unless this
+        # is a dedicated bot account and the caller explicitly opts in.
+        if os.getenv("LIVE_ACCOUNT_DEDICATED_TO_BOT","false").lower()!="true":
+            raise LiveSafetyError("Refusing Exit-All: account is not explicitly marked dedicated to this bot")
         if not self.active_bot_positions(owned_ids): return {"status":"NO_BOT_POSITIONS"}
         return self.request("DELETE","/positions")
 
