@@ -153,7 +153,6 @@ def load_nifty500_universe():
         "SecurityId": nifty["SecurityId"],
     })
 
-@st.cache_data(ttl=10, show_spinner=False)
 def _history(client, security_id):
     end = date.today()
     start = end - timedelta(days=420)
