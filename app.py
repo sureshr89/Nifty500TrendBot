@@ -358,7 +358,6 @@ def load_dhan_broad_index_ids():
         if hit is None:
             raise RuntimeError(f"Dhan index Security ID not found for {label} in current Dhan security master")
         # Store both Security ID and the exchange segment. The five NSE
-        # indices use IDX_I, while GIFT NIFTY may be represented differently
         # in Dhan's current master.
         exch = str(hit.get("EXCH_ID", "")).upper().strip()
         seg = str(hit.get("SEGMENT", "")).upper().strip()
@@ -664,7 +663,6 @@ def trend_check(state):
     # Verify all five on every refresh and retry only an index for which Dhan
     # did not return a valid LTP in the first response.
     # Fetch all six indices using the exchange segment resolved from Dhan's
-    # current security master. This keeps GIFT NIFTY dynamic and avoids a
     # guessed/hard-coded Security ID.
     index_requests = {}
     for name, meta in index_ids.items():
