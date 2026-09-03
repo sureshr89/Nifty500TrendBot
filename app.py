@@ -214,7 +214,7 @@ def now_ist():
 
 def in_entry_window(dt):
     hhmm = dt.strftime("%H:%M")
-    return "09:30" <= hhmm < "13:00"
+    return "09:15" <= hhmm < "13:00"
 
 def _github_trade_state_url():
     return f"https://api.github.com/repos/{REPO}/contents/paper_trades.json"
