@@ -68,18 +68,32 @@ def load_full_nifty500_universe():
     # NSE symbol against the Dhan symbol column before declaring it unmapped.
     nifty["Symbol"] = nifty["Symbol"].astype(str).str.upper().str.strip()
     dhan_symbol_col = next(
-        (c for c in ["SYMBOL_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "UNDERLYING_SYMBOL"]
-         if c in equity.columns),
+        (c for c in [
+            # Dhan detailed master commonly uses SYMBOL_NAME/DISPLAY_NAME.
+            # Some master revisions expose the exchange trading symbol under
+            # SEM_TRADING_SYMBOL/SM_SYMBOL_NAME instead, so check all aliases.
+            "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME",
+            "DISPLAY_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "UNDERLYING_SYMBOL",
+        ] if c in equity.columns),
         None,
     )
     if dhan_symbol_col:
-        equity["_NIFTY_SYMBOL"] = equity[dhan_symbol_col].astype(str).str.upper().str.strip()
-        symbol_mapping = (
-            equity.dropna(subset=["_NIFTY_SYMBOL", "SECURITY_ID"])
-            .drop_duplicates("_NIFTY_SYMBOL")
-            .set_index("_NIFTY_SYMBOL")["SECURITY_ID"]
-            .to_dict()
-        )
+        # Build the fallback from every available Dhan symbol alias, not only
+        # the first column. This avoids losing an NSE equity when DISPLAY_NAME
+        # contains a descriptive name while the exchange symbol is in another
+        # column.
+        symbol_mapping = {}
+        for col in [
+            "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME",
+            "DISPLAY_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "UNDERLYING_SYMBOL",
+        ]:
+            if col not in equity.columns:
+                continue
+            pairs = equity.dropna(subset=[col, "SECURITY_ID"])[[col, "SECURITY_ID"]].copy()
+            pairs["_NIFTY_SYMBOL"] = pairs[col].astype(str).str.upper().str.strip()
+            for symbol, security_id in pairs.drop_duplicates("_NIFTY_SYMBOL")[["_NIFTY_SYMBOL", "SECURITY_ID"]].itertuples(index=False):
+                if symbol and symbol != "NAN":
+                    symbol_mapping.setdefault(symbol, security_id)
         missing_sid = nifty["SecurityId"].isna()
         nifty.loc[missing_sid, "SecurityId"] = nifty.loc[missing_sid, "Symbol"].map(symbol_mapping)
 
