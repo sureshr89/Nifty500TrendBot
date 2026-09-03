@@ -22,7 +22,7 @@ IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
-STRATEGY_STATE_VERSION = "S1_PDH_PDL_V3"
+STRATEGY_STATE_VERSION = "S1_PDH_PDL_RR125_V4"
 
 APP_BUILD = "mandatory-5index-basis-v6-dhan-master-fix"
 
@@ -212,9 +212,12 @@ def load_dhan_broad_index_ids():
 def now_ist():
     return datetime.now(IST)
 
+TRADE_DATA_START = "09:15"
+
 def in_entry_window(dt):
     hhmm = dt.strftime("%H:%M")
-    return "09:15" <= hhmm < "13:00"
+    # All new S1 trade decisions/data begin from the regular market open at 09:15 IST.
+    return TRADE_DATA_START <= hhmm < "13:00"
 
 def _github_trade_state_url():
     return f"https://api.github.com/repos/{REPO}/contents/paper_trades.json"
@@ -298,7 +301,7 @@ def clean_trade_history(trades):
             rr = reward / rps if rps > 0 else -1
             if (entry > 0 and qty > 0 and cap <= 150000.0 + 1e-6 and
                     1000.0 - 1e-6 <= risk <= 1500.0 + 1e-6 and
-                    abs(rr - 1.5) < 1e-6):
+                    abs(rr - 1.25) < 1e-6):
                 cleaned.append(t)
         except Exception:
             pass
@@ -613,7 +616,7 @@ def trend_check(state):
 
         MIN_RISK_PER_TRADE = 1000.0
         MAX_RISK_PER_TRADE = 1500.0
-        TARGET_R_MULTIPLE = 1.5  # Reward = 1.5 × initial risk (RR 1:1.5)
+        TARGET_R_MULTIPLE = 1.25  # Reward = 1.25 × initial risk (RR 1:1.25)
 
         def open_position(strategy, side, stock, sid, q, sl, target):
             entry = float(q["ltp"])
@@ -904,8 +907,8 @@ with st.expander("📡 Dhan Live Coverage — 15 Second Snapshot", expanded=Fals
 st.divider()
 with st.expander("🎯 S1 — Strategy Rules",expanded=False):
     rules=[
-        ["S1","BUY","Existing window","Open between PDL/PDH → cross PDH","PDL","1.5R","SL / Target / existing square-off"],
-        ["S1","SELL","Existing window","Open between PDL/PDH → cross PDL","PDH","1.5R","SL / Target / existing square-off"],
+        ["S1","BUY","Existing window","Open between PDL/PDH → cross PDH","PDL","1.25R","SL / Target / existing square-off"],
+        ["S1","SELL","Existing window","Open between PDL/PDH → cross PDL","PDH","1.25R","SL / Target / existing square-off"],
     ]
     st.dataframe(pd.DataFrame(rules,columns=["Strategy","Side","Entry Window","Exact Entry Condition","SL","Target","Exit"]),use_container_width=True,hide_index=True)
 
