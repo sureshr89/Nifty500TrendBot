@@ -324,7 +324,7 @@ def fetch_equity_ohlc(client, security_ids):
 
 
 def add_s1_levels(frame, history_by_sid=None):
-    """Attach PDH/PDL/PDC without shrinking the universe.
+    """Attach PDH/PDL/PDC/PDO without shrinking the universe.
 
     Reuse the historical frame already fetched during trend classification so
     the pre-market scan does not make a second historical API call per stock.
@@ -347,10 +347,11 @@ def add_s1_levels(frame, history_by_sid=None):
                     "PDH": float(prev["high"]),
                     "PDL": float(prev["low"]),
                     "PDC": float(prev["close"]),
+                    "PDO": float(prev["open"]),
                 }
         except Exception:
             continue
-    for col in ("PDH", "PDL", "PDC"):
+    for col in ("PDH", "PDL", "PDC", "PDO"):
         out[col] = out["SecurityId"].map(lambda sid: ranges.get(int(sid), {}).get(col))
     return out
 
