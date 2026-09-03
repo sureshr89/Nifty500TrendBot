@@ -26,7 +26,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v12-gift-nseix"
+APP_BUILD = "live-ltp-direct-v13-gift-nseix-block"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -376,35 +376,52 @@ def load_dhan_broad_index_ids():
     return out
 
 def load_gift_nifty_quote():
-    """Fetch near-month GIFT NIFTY futures from the official NSEIX public page.
+    """Fetch near-month GIFT NIFTY from the official NSEIX live page.
 
-    No fake Yahoo ticker and no extra broker token are used. GIFT NIFTY is an
-    NSEIX derivative, not the regular NIFTY 50 index.
+    The official page text contains a stable 'Intra Day Price – Near month GIFT
+    NIFTY Future' block. Parse that block directly instead of trying to match
+    the entire Live Watch table.
     """
     try:
         r = requests.get(
-            "https://www.nseix.com/",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=12,
+            "https://www1.nseix.com/",
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            timeout=15,
         )
         r.raise_for_status()
-        html = r.text
+        raw = r.text
+        plain = html_lib.unescape(re.sub(r"<[^>]+>", " ", raw))
+        plain = re.sub(r"\s+", " ", plain)
 
-        # Official page exposes the near-month GIFT NIFTY section. Accept only
-        # a number immediately associated with the NIFTY futures market row.
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = html_lib.unescape(re.sub(r"\s+", " ", text))
-
-        # Look for the NIFTY futures row and capture LTP followed by change.
+        # Official current page block:
+        # Intra Day Price – Near month GIFT NIFTY Future <LTP> <Change> (<Pct>%)
         m = re.search(
-            r"Index\s*Futures\s*.*?NIFTY\s*.*?(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s+([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)",
-            text,
+            r"Near\s*month\s*GIFT\s*NIFTY\s*Future\s*"
+            r"([0-9][0-9,]*(?:\.\d+)?)\s*"
+            r"([+-]?[0-9][0-9,]*(?:\.\d+)?)\s*"
+            r"\(\s*([+-]?[0-9]+(?:\.\d+)?)%\s*\)",
+            plain,
             re.IGNORECASE,
         )
         if not m:
+            # Fallback to the first near-month NIFTY row in the official table.
+            m = re.search(
+                r"Index\s*Futures\s*\|?\s*NIFTY\s*\|?\s*"
+                r"[0-9]{1,2}-[A-Za-z]{3}-[0-9]{4}.*?"
+                r"([0-9][0-9,]*(?:\.\d+)?)\s*\|?\s*"
+                r"([+-]?[0-9][0-9,]*(?:\.\d+)?)\s*\|?\s*"
+                r"([+-]?[0-9]+(?:\.\d+)?)",
+                plain,
+                re.IGNORECASE,
+            )
+
+        if not m:
             return {
                 "ltp": None, "previous_close": None, "pct": None,
-                "status": "Official NSEIX page returned no parsable GIFT NIFTY quote",
+                "status": "NSEIX live quote block not found",
             }
 
         ltp = float(m.group(1).replace(",", ""))
@@ -414,7 +431,7 @@ def load_gift_nifty_quote():
         if ltp <= 0 or pdc <= 0:
             return {
                 "ltp": None, "previous_close": None, "pct": None,
-                "status": "Official NSEIX quote values invalid",
+                "status": "NSEIX returned invalid GIFT NIFTY values",
             }
         return {
             "ltp": ltp,
@@ -425,7 +442,7 @@ def load_gift_nifty_quote():
     except Exception as e:
         return {
             "ltp": None, "previous_close": None, "pct": None,
-            "status": f"NSEIX request/parsing failed: {type(e).__name__}",
+            "status": f"NSEIX request failed: {type(e).__name__}",
         }
 
 def now_ist():
