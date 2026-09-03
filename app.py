@@ -10,6 +10,7 @@ import json
 import time
 import base64
 import os
+import html as html_lib
 from datetime import datetime
 from io import StringIO
 from zoneinfo import ZoneInfo
@@ -25,7 +26,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "live-ltp-direct-v11-gift-yfinance"
+APP_BUILD = "live-ltp-direct-v12-gift-nseix"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -375,41 +376,57 @@ def load_dhan_broad_index_ids():
     return out
 
 def load_gift_nifty_quote():
-    """Best-effort GIFT NIFTY quote.
+    """Fetch near-month GIFT NIFTY futures from the official NSEIX public page.
 
-    Try yfinance first with Yahoo's current futures symbol, then Dhan INX global
-    instruments if an INX security mapping is present in the current Dhan master.
-    This deliberately removes the unusable Upstox-token dependency.
+    No fake Yahoo ticker and no extra broker token are used. GIFT NIFTY is an
+    NSEIX derivative, not the regular NIFTY 50 index.
     """
-    errors = []
-
-    # 1) Yahoo Finance / yfinance: GIFT NIFTY futures.
     try:
-        import yfinance as yf
-        for symbol in ("^NSEI", "NIFTY_F1.NS"):
-            t = yf.Ticker(symbol)
-            hist = t.history(period="5d", interval="1d", auto_adjust=False)
-            info = t.fast_info or {}
-            ltp = info.get("last_price")
-            if ltp is None and not hist.empty:
-                ltp = float(hist["Close"].iloc[-1])
-            if hist is not None and len(hist) >= 2:
-                pdc = float(hist["Close"].iloc[-2])
-            else:
-                pdc = None
-            if ltp is not None and pdc not in (None, 0):
-                ltp = float(ltp)
-                pct = (ltp - pdc) / pdc * 100.0
-                return {"ltp": ltp, "previous_close": pdc, "pct": pct,
-                        "status": f"LIVE via Yahoo Finance ({symbol})"}
-        errors.append("Yahoo symbols returned no valid quote")
-    except Exception as e:
-        errors.append(f"Yahoo: {type(e).__name__}")
+        r = requests.get(
+            "https://www.nseix.com/",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=12,
+        )
+        r.raise_for_status()
+        html = r.text
 
-    return {
-        "ltp": None, "previous_close": None, "pct": None,
-        "status": "GIFT NIFTY unavailable — " + "; ".join(errors),
-    }
+        # Official page exposes the near-month GIFT NIFTY section. Accept only
+        # a number immediately associated with the NIFTY futures market row.
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = html_lib.unescape(re.sub(r"\s+", " ", text))
+
+        # Look for the NIFTY futures row and capture LTP followed by change.
+        m = re.search(
+            r"Index\s*Futures\s*.*?NIFTY\s*.*?(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s+([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)",
+            text,
+            re.IGNORECASE,
+        )
+        if not m:
+            return {
+                "ltp": None, "previous_close": None, "pct": None,
+                "status": "Official NSEIX page returned no parsable GIFT NIFTY quote",
+            }
+
+        ltp = float(m.group(1).replace(",", ""))
+        change = float(m.group(2).replace(",", ""))
+        pct = float(m.group(3))
+        pdc = ltp - change
+        if ltp <= 0 or pdc <= 0:
+            return {
+                "ltp": None, "previous_close": None, "pct": None,
+                "status": "Official NSEIX quote values invalid",
+            }
+        return {
+            "ltp": ltp,
+            "previous_close": pdc,
+            "pct": pct,
+            "status": "LIVE via official NSEIX",
+        }
+    except Exception as e:
+        return {
+            "ltp": None, "previous_close": None, "pct": None,
+            "status": f"NSEIX request/parsing failed: {type(e).__name__}",
+        }
 
 def now_ist():
     return datetime.now(IST)
