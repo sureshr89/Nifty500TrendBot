@@ -31,10 +31,10 @@ st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_full_nifty500_universe():
-    """Independent live breadth universe from official NSE membership.
+    """Map every official NSE NIFTY 500 constituent to a Dhan NSE_EQ Security ID.
 
-    NSE defines the 500 constituents; Dhan provides tradable Security IDs.
-    A temporary Dhan-master mismatch must never stop the whole dashboard.
+    ISIN is the primary key. If Dhan's current master has an ISIN mismatch,
+    a unique NSE trading-symbol match is used as a controlled fallback.
     """
     nse = requests.get(
         "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv",
@@ -43,11 +43,13 @@ def load_full_nifty500_universe():
     )
     nse.raise_for_status()
     nifty = pd.read_csv(StringIO(nse.text))
+    if len(nifty) != 500:
+        raise RuntimeError(f"Official NSE NIFTY 500 file has {len(nifty)} rows; expected 500")
+
     master = pd.read_csv(
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
         low_memory=False,
     )
-
     nifty["ISIN Code"] = nifty["ISIN Code"].astype(str).str.upper().str.strip()
     nifty["Symbol"] = nifty["Symbol"].astype(str).str.upper().str.strip()
 
@@ -59,50 +61,66 @@ def load_full_nifty500_universe():
     ].copy()
     equity["ISIN"] = equity["ISIN"].astype(str).str.upper().str.strip()
 
-    # Primary mapping: official NSE ISIN -> Dhan Security ID.
-    mapping = equity.drop_duplicates("ISIN").set_index("ISIN")["SECURITY_ID"].to_dict()
-    nifty["SecurityId"] = nifty["ISIN Code"].map(mapping)
+    # Primary, safest mapping: official NSE ISIN -> Dhan Security ID.
+    isin_counts = equity["ISIN"].value_counts()
+    unique_isin = equity[equity["ISIN"].map(isin_counts).eq(1)]
+    isin_mapping = unique_isin.set_index("ISIN")["SECURITY_ID"].to_dict()
+    nifty["SecurityId"] = nifty["ISIN Code"].map(isin_mapping)
 
-    # Fallback mapping: some Dhan master rows can have missing/non-matching
-    # ISIN metadata even though the NSE equity is present. Match the official
-    # NSE symbol against the Dhan symbol column before declaring it unmapped.
-    nifty["Symbol"] = nifty["Symbol"].astype(str).str.upper().str.strip()
-    dhan_symbol_col = next(
-        (c for c in [
-            # Dhan detailed master commonly uses SYMBOL_NAME/DISPLAY_NAME.
-            # Some master revisions expose the exchange trading symbol under
-            # SEM_TRADING_SYMBOL/SM_SYMBOL_NAME instead, so check all aliases.
-            "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME",
-            "DISPLAY_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "UNDERLYING_SYMBOL",
-        ] if c in equity.columns),
-        None,
-    )
-    if dhan_symbol_col:
-        # Build the fallback from every available Dhan symbol alias, not only
-        # the first column. This avoids losing an NSE equity when DISPLAY_NAME
-        # contains a descriptive name while the exchange symbol is in another
-        # column.
-        symbol_mapping = {}
-        for col in [
-            "SEM_TRADING_SYMBOL", "SM_SYMBOL_NAME", "SYMBOL_NAME",
-            "DISPLAY_NAME", "SEM_CUSTOM_SYMBOL", "SYMBOL", "UNDERLYING_SYMBOL",
-        ]:
-            if col not in equity.columns:
-                continue
-            pairs = equity.dropna(subset=[col, "SECURITY_ID"])[[col, "SECURITY_ID"]].copy()
-            pairs["_NIFTY_SYMBOL"] = pairs[col].astype(str).str.upper().str.strip()
-            for symbol, security_id in pairs.drop_duplicates("_NIFTY_SYMBOL")[["_NIFTY_SYMBOL", "SECURITY_ID"]].itertuples(index=False):
-                if symbol and symbol != "NAN":
-                    symbol_mapping.setdefault(symbol, security_id)
-        missing_sid = nifty["SecurityId"].isna()
-        nifty.loc[missing_sid, "SecurityId"] = nifty.loc[missing_sid, "Symbol"].map(symbol_mapping)
+    # Controlled fallback: unique NSE symbol -> Dhan symbol. Dhan's detailed
+    # master has used different symbol-column names across versions, so detect
+    # the available column instead of assuming one fixed schema.
+    symbol_candidates = [
+        "SEM_TRADING_SYMBOL", "SYMBOL_NAME", "SYMBOL", "TRADING_SYMBOL",
+        "SEM_CUSTOM_SYMBOL", "SEM_SMST_SECURITY_ID",
+    ]
+    symbol_col = next((c for c in symbol_candidates if c in equity.columns), None)
+    if symbol_col:
+        equity["_SYMBOL"] = equity[symbol_col].astype(str).str.upper().str.strip()
+        symbol_counts = equity["_SYMBOL"].value_counts()
+        unique_symbol = equity[equity["_SYMBOL"].map(symbol_counts).eq(1)]
+        symbol_mapping = unique_symbol.set_index("_SYMBOL")["SECURITY_ID"].to_dict()
+        missing_mask = nifty["SecurityId"].isna()
+        nifty.loc[missing_mask, "SecurityId"] = nifty.loc[missing_mask, "Symbol"].map(symbol_mapping)
 
-    # Do not fail the entire trading monitor for one temporary Dhan-master
-    # mismatch. Unmapped members are excluded from A/D and coverage rules
-    # decide whether new trades are allowed (minimum coverage remains 480).
-    nifty = nifty.dropna(subset=["SecurityId"]).copy()
+    # Final controlled fallback for cases where Dhan's current master has
+    # non-standard/blank SERIES or INSTRUMENT metadata for an otherwise valid
+    # NSE cash-equity constituent (HFCL is one such example).
+    missing_mask = nifty["SecurityId"].isna()
+    broad_symbol_col = next((c for c in symbol_candidates if c in master.columns), None)
+    if missing_mask.any() and broad_symbol_col:
+        broad = master[master["EXCH_ID"].astype(str).str.upper().eq("NSE")].copy()
+        broad["_SYMBOL"] = broad[broad_symbol_col].astype(str).str.upper().str.strip()
+        broad = broad[broad["_SYMBOL"].isin(nifty.loc[missing_mask, "Symbol"])]
+        if not broad.empty:
+            # Prefer a single candidate; otherwise prefer rows whose segment
+            # looks like cash equity. Ambiguous symbols are intentionally not mapped.
+            for idx in nifty.index[missing_mask]:
+                sym = nifty.at[idx, "Symbol"]
+                candidates = broad[broad["_SYMBOL"].eq(sym)].copy()
+                if len(candidates) > 1 and "SEGMENT" in candidates.columns:
+                    eq_candidates = candidates[candidates["SEGMENT"].astype(str).str.upper().eq("E")]
+                    if len(eq_candidates) == 1:
+                        candidates = eq_candidates
+                if len(candidates) == 1:
+                    nifty.at[idx, "SecurityId"] = candidates.iloc[0]["SECURITY_ID"]
+
+    unresolved = nifty[nifty["SecurityId"].isna()]
+    if not unresolved.empty:
+        details = ", ".join(
+            f"{r['Symbol']} ({r['ISIN Code']})"
+            for _, r in unresolved.iterrows()
+        )
+        raise RuntimeError(
+            f"NIFTY 500 membership could not be mapped to Dhan IDs: {details}"
+        )
+
     nifty["SecurityId"] = nifty["SecurityId"].astype(int)
-    nifty = nifty.drop_duplicates(subset=["SecurityId"]).copy()
+    if nifty["SecurityId"].duplicated().any():
+        dupes = nifty[nifty["SecurityId"].duplicated(keep=False)][["Symbol", "SecurityId"]]
+        raise RuntimeError(f"Duplicate Dhan Security ID mapping in NIFTY 500: {dupes.to_dict(orient='records')}")
+    if len(nifty) != 500:
+        raise RuntimeError(f"NIFTY 500 membership mapped to Dhan IDs incomplete: expected 500, got {len(nifty)}")
 
     sector = nifty["Industry"].fillna("Other").astype(str) if "Industry" in nifty.columns else "Other"
     return pd.DataFrame({
