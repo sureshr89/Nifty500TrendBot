@@ -1354,6 +1354,18 @@ if LIVE_MODE:
                     except Exception:
                         pass
                     st.rerun()
+
+            # A previous ERROR/finished state must never leave the test screen
+            # without a usable action after Streamlit reruns.
+            if _s2.get("state") in ("ERROR", "EXIT_SENT", "DONE", "EXIT_ERROR"):
+                if st.button("▶️ START NEW ONE-TIME S2 TEST", key="s2_start_new"):
+                    _s2 = {"state": "IDLE"}
+                    st.session_state.s2_test = _s2
+                    try:
+                        store.save_s2_test_state(_s2)
+                    except Exception:
+                        pass
+                    st.rerun()
             _buy_time = _s2.get("buy_time")
             if _s2.get("state") == "BUY_SENT" and _buy_time:
                 try:
