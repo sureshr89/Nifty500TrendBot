@@ -27,6 +27,25 @@ STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
 APP_BUILD = "execution-v1-s1-rr1-trade1-daily3000-broker-confirmed"
+
+# Streamlit Secrets are not automatically exposed as process environment
+# variables. Mirror only the explicitly configured execution values so the
+# DhanExecutionClient and the dashboard use the same credentials and gates.
+for _key in (
+    "DHAN_CLIENT_ID",
+    "DHAN_ACCESS_TOKEN",
+    "LIVE_TRADING_ENABLED",
+    "LIVE_STATIC_IP_APPROVED",
+    "LIVE_TRADING_CONFIRMATION",
+    "LIVE_ACCOUNT_DEDICATED_TO_BOT",
+):
+    try:
+        _value = st.secrets.get(_key)
+    except Exception:
+        _value = None
+    if _value not in (None, ""):
+        os.environ[_key] = str(_value)
+
 LIVE_MODE = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
