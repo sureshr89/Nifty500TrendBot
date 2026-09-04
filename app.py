@@ -38,6 +38,11 @@ for _key in (
     "LIVE_STATIC_IP_APPROVED",
     "LIVE_TRADING_CONFIRMATION",
     "LIVE_ACCOUNT_DEDICATED_TO_BOT",
+    "PROXY_HOST",
+    "PROXY_PORT",
+    "PROXY_USERNAME",
+    "PROXY_PASSWORD",
+    "PROXY_IP",
 ):
     try:
         _value = st.secrets.get(_key)
