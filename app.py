@@ -25,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "dry-run-v2-s1-rr1-max2-trades1-daily3000-opens"
+APP_BUILD = "dry-run-v3-s1-rr1-trade1-daily3000-dailybaseline"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -447,7 +447,8 @@ def persist_trades(runtime):
     data = {
         "strategy_version": STRATEGY_STATE_VERSION,
         "trades": list(merged.values()),
-        "last_ltp": {**(stored.get("last_ltp", {}) or {}), **(runtime.get("last_ltp", {}) or {})},
+        "last_ltp": runtime.get("last_ltp", {}) or {},
+        "last_ltp_date": runtime.get("last_ltp_date"),
     }
     body = {"message": "Persist paper trade state (history protected)", "content": base64.b64encode(json.dumps(data, separators=(",", ":")).encode("utf-8")).decode("ascii"), "branch": "bot-state"}
     if sha:
@@ -840,6 +841,15 @@ def trend_check(state):
    
     trades = runtime["trades"]
     dt = now_ist()
+
+    # Fresh-crossing data must never carry over from a previous trading day.
+    # Resetting this baseline prevents yesterday\'s final LTP from being
+    # mistaken for a fresh PDH/PDL crossing at today\'s opening session.
+    today_key = dt.strftime("%Y-%m-%d")
+    if runtime.get("last_ltp_date") != today_key:
+        runtime["last_ltp"] = {}
+        runtime["last_ltp_date"] = today_key
+
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
     # 14:55 mandatory square-off for every open strategy position.
