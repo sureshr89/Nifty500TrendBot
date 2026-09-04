@@ -18,6 +18,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
+from live_execution import DhanExecutionClient, LiveSafetyError, correlation_id, prepare_signal
 
 IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
@@ -25,7 +26,8 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "dry-run-v3-s1-rr1-trade1-daily3000-dailybaseline"
+APP_BUILD = "execution-v1-s1-rr1-trade1-daily3000-broker-confirmed"
+LIVE_MODE = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -924,6 +926,7 @@ def trend_check(state):
         "cross_detected": 0,
         "sizing_rejected": 0,
         "entries_opened": 0,
+        "execution_error": None,
     }
     if (len(open_trades) < MAX_OPEN_TRADES and daily_limits_ok
             and in_entry_window(dt) and breadth_valid and valid_count >= 480
@@ -985,6 +988,27 @@ def trend_check(state):
                 return False
             if actual_capital > MAX_CAPITAL_PER_TRADE:
                 return False
+            broker_order = None
+            broker_fill = None
+            if LIVE_MODE:
+                try:
+                    sizing, broker_target = prepare_signal(side, entry, sl)
+                    if int(sizing.quantity) != int(quantity) or abs(float(broker_target) - float(target)) > 1e-6:
+                        raise LiveSafetyError("Live execution sizing does not match validated S1 signal")
+                    broker = DhanExecutionClient()
+                    cid = correlation_id(sid, side)
+                    broker_order = broker.place_super_order(
+                        sid=sid, side=side, quantity=quantity, entry=entry,
+                        target=target, stop=sl, cid=cid, owned_ids={sid}
+                    )
+                    order_id = broker_order.get("orderId") if isinstance(broker_order, dict) else None
+                    if not order_id:
+                        raise LiveSafetyError(f"Dhan did not return orderId: {broker_order}")
+                    broker_fill = broker.confirm_super_order(order_id)
+                except Exception as exc:
+                    entry_diagnostics["execution_error"] = str(exc)
+                    return False
+
             trades.append({
                 "strategy": strategy, "side": side, "status": "OPEN",
                 "Symbol": stock["Symbol"], "SecurityId": sid,
@@ -1000,7 +1024,12 @@ def trend_check(state):
                 "PDL": float(stock["PDL"]), "PDC": float(stock.get("PDC", 0)),
                 "Today's Open": float(today_open), "Previous Day Open (PDO)": float(pdo),
                 "SL": sl, "target": target,
-                "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")
+                "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S IST"),
+                "execution_mode": "LIVE" if LIVE_MODE else "DRY-RUN",
+                "broker_order_id": (broker_fill or broker_order or {}).get("orderId") if isinstance((broker_fill or broker_order), dict) else None,
+                "broker_correlation_id": correlation_id(sid, side) if LIVE_MODE else None,
+                "broker_average_price": (broker_fill or {}).get("averageTradedPrice") if isinstance(broker_fill, dict) else None,
+                "broker_filled_qty": (broker_fill or {}).get("filledQty") if isinstance(broker_fill, dict) else None
             })
             return True
 
@@ -1092,9 +1121,7 @@ def trend_check(state):
             if entry_made:
                 entry_diagnostics["entries_opened"] += 1
 
-            # Do not stop after the first entry. S1 allows up to two
-            # simultaneous open positions, so continue evaluating candidates
-            # until the limit is reached.
+            # One trade per day: stop once the single permitted S1 entry is recorded.
             if entry_made:
                 # Hard-stop candidate processing when either simultaneous-position
                 # or whole-day trade limit is reached.
@@ -1145,7 +1172,7 @@ div[data-testid="stExpander"] {border-radius:12px;}
 """,unsafe_allow_html=True)
 
 st.title("📈 NIFTY 500 Trend Bot")
-st.caption("Live Dhan monitoring • S1 DRY-RUN strategy • No real orders")
+st.caption("Live Dhan monitoring • S1 LIVE execution armed" if LIVE_MODE else "Live Dhan monitoring • S1 DRY-RUN strategy • No real orders")
 
 try:
     state=load_premarket_state()
@@ -1315,14 +1342,14 @@ with st.expander("🎯 S1 — Strategy Rules",expanded=False):
 diag = market.get("entry_diagnostics", {})
 st.divider()
 st.subheader("🧪 S1 Dry-Run Control")
-st.caption("DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent from this dashboard.")
+st.caption("LIVE MODE • Real Dhan orders can be sent after all execution safety gates pass." if LIVE_MODE else "DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent from this dashboard.")
 
 trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 1) or 1)
 loss_limit_ok = float(diag.get("daily_realized_loss", 0) or 0) < float(diag.get("max_daily_loss", 3000) or 3000)
 open_limit_ok = int(diag.get("open_positions", 0) or 0) < 1
 
 cards([
-    ("Mode", "🧪 DRY-RUN"),
+    ("Mode", "🔴 LIVE" if LIVE_MODE else "🧪 DRY-RUN"),
     ("Trades Today", f"{diag.get('trades_today', 0)} / {diag.get('max_trades_per_day', 1)}"),
     ("Daily Loss", f"₹{float(diag.get('daily_realized_loss', 0) or 0):,.2f} / ₹{float(diag.get('max_daily_loss', 3000) or 3000):,.0f}"),
     ("Open Positions", f"{diag.get('open_positions', 0)} / 1"),
@@ -1333,7 +1360,7 @@ cards([
 ], 3)
 
 with st.expander("🔎 S1 Entry Diagnostics", expanded=False):
-    st.caption("Exact live-data gates for the current scan cycle. This panel does not send any broker order.")
+    st.caption("Exact live-data and execution gates for the current scan cycle. In DRY-RUN no broker order is sent; in LIVE mode Dhan execution requires every safety gate.")
     cards([
         ("Market Mode", str(diag.get("mode", "UNKNOWN"))),
         ("Candidates Checked", diag.get("candidates", 0)),
@@ -1342,6 +1369,7 @@ with st.expander("🔎 S1 Entry Diagnostics", expanded=False):
         ("Inside PDH–PDL", diag.get("inside_range", 0)),
         ("Fresh Crossings", diag.get("cross_detected", 0)),
         ("Sizing Rejected", diag.get("sizing_rejected", 0)),
+        ("Execution Error", "NONE" if not diag.get("execution_error") else str(diag.get("execution_error"))[:80]),
     ], 3)
     st.caption(
         f"Entry window: {'ACTIVE' if diag.get('entry_window') else 'CLOSED'} • "
