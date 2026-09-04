@@ -1304,44 +1304,61 @@ if LIVE_MODE:
             f"Explicit test only • RPOWER • Security ID {_sid} • 1 share • "
             f"current LTP ₹{_quote.get('ltp', '—')} • BUY once, then exit after 5 minutes."
         )
-        if _s2.get("state") == "IDLE":
-            if st.button("🔴 BUY 1 RPOWER SHARE — ONE-TIME LIVE TEST", disabled=not _ready, key="s2_buy_one"):
-                # Persist the click immediately so the user gets instant visual
-                # feedback even while the broker/proxy request is in progress.
-                _s2.update({"state": "BUY_SUBMITTING", "submit_time": datetime.now(IST).isoformat()})
-                st.session_state.s2_test = _s2
-                try:
-                    store.save_s2_test_state(_s2)
-                except Exception:
-                    pass
-                st.info("Submitting 1-share BUY request to Dhan… please wait.")
-                try:
-                    _broker = DhanExecutionClient()
-                    _cid = f"S2T-{datetime.now(IST):%y%m%d}-RPOWER-B"
-                    _order = _broker.place_market_order(_sid, "BUY", 1, _cid)
+        def _submit_s2_buy(security_id):
+            """Run the real S2 request as a Streamlit button callback.
+
+            Callbacks execute before the normal dashboard rerun, so a 500-stock
+            market refresh cannot make a BUY click appear to do nothing.
+            """
+            current = st.session_state.get("s2_test", {"state": "IDLE"})
+            if current.get("state") != "IDLE":
+                return
+            current.update({
+                "state": "BUY_SUBMITTING",
+                "submit_time": datetime.now(IST).isoformat(),
+                "sid": int(security_id),
+                "symbol": "RPOWER",
+            })
+            st.session_state.s2_test = current
+            try:
+                broker = DhanExecutionClient()
+                cid = f"S2T-{datetime.now(IST):%y%m%d}-RPOWER-B"
+                order = broker.place_market_order(int(security_id), "BUY", 1, cid)
+                current.update({
+                    "state": "BUY_SENT",
+                    "buy_order": order,
+                    "buy_time": datetime.now(IST).isoformat(),
+                    "buy_cid": cid,
+                })
+            except Exception as exc:
+                current.update({
+                    "state": "ERROR",
+                    "error": str(exc),
+                    "error_time": datetime.now(IST).isoformat(),
+                })
+            st.session_state.s2_test = current
+
+        # Recover a stale state left by an interrupted browser/deployment run.
+        if _s2.get("state") == "BUY_SUBMITTING":
+            try:
+                _submitted = datetime.fromisoformat(_s2.get("submit_time", ""))
+                if (datetime.now(IST) - _submitted).total_seconds() > 90:
                     _s2.update({
-                        "state": "BUY_SENT",
-                        "sid": _sid,
-                        "symbol": "RPOWER",
-                        "buy_order": _order,
-                        "buy_time": datetime.now(IST).isoformat(),
-                        "buy_cid": _cid,
+                        "state": "ERROR",
+                        "error": "S2 submission did not complete within 90 seconds. Reset and try once again.",
                     })
                     st.session_state.s2_test = _s2
-                    try:
-                        store.save_s2_test_state(_s2)
-                    except Exception:
-                        pass
-                    st.success(f"BUY request sent to Dhan. Response: {_order}")
-                    st.rerun()
-                except Exception as _exc:
-                    _s2.update({"state": "ERROR", "error": str(_exc)})
-                    st.session_state.s2_test = _s2
-                    try:
-                        store.save_s2_test_state(_s2)
-                    except Exception:
-                        pass
-                    st.error(f"S2 BUY failed: {_exc}")
+            except Exception:
+                pass
+
+        if _s2.get("state") == "IDLE":
+            st.button(
+                "🔴 BUY 1 RPOWER SHARE — ONE-TIME LIVE TEST",
+                disabled=not _ready,
+                key="s2_buy_one",
+                on_click=_submit_s2_buy,
+                args=(_sid,),
+            )
         else:
             st.info(f"S2 test state: {_s2.get('state')}")
             if _s2.get("state") == "ERROR":
