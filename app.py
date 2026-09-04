@@ -26,7 +26,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V7_ENTRY_WINDOW_1400"
 
-APP_BUILD = "execution-v4-s2-one-share-rpower-test"
+APP_BUILD = "execution-v5-rate-limit-safe"
 
 # Streamlit Secrets are not automatically exposed as process environment
 # variables. Mirror only the explicitly configured execution values so the
@@ -54,7 +54,7 @@ for _key in (
 LIVE_MODE = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
-st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
+st_autorefresh(interval=30_000, key="trend_dashboard_refresh")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_full_nifty500_universe():
@@ -248,7 +248,18 @@ class DhanLiveClient:
         ids = list(dict.fromkeys(int(x) for x in security_ids))
         if not ids:
             return {}
-        data = self.post("/marketfeed/quote", {exchange_segment: ids})
+        # Quote API is rate-limited more aggressively than LTP. Split large
+        # universes into smaller paced requests instead of one 500-stock burst.
+        data = {"data": {exchange_segment: {}}}
+        chunk_size = 100
+        for offset in range(0, len(ids), chunk_size):
+            chunk = ids[offset:offset + chunk_size]
+            chunk_data = self.post("/marketfeed/quote", {exchange_segment: chunk})
+            data["data"][exchange_segment].update(
+                ((chunk_data.get("data") or {}).get(exchange_segment) or {})
+            )
+            if offset + chunk_size < len(ids):
+                time.sleep(1.2)
         rows = ((data.get("data") or {}).get(exchange_segment) or {})
         out = {}
         for sid in ids:
