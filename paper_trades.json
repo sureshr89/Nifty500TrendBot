@@ -1,1 +1,6 @@
-{"strategy_version":"S1_STRICT_LEVEL_ENTRY_V5","trades":[{"strategy":"S1","side":"BUY","status":"OPEN","Symbol":"KPRMILL","SecurityId":14912,"Sector":"Textiles","sector_ad":4.0,"trend_1d":0.7682347863616825,"entry_price":1182.9,"quantity":30,"risk_per_share":49.600000000000136,"risk_amount":1488.000000000004,"PDH":1182.9,"PDL":1133.3,"PDC":1167.4,"Today's Open":1179.7,"Previous Day Open (PDO)":1154.0,"SL":1133.3,"target":1232.5000000000002,"entry_time":"2026-09-04 09:20:40 IST"}],"last_ltp":{},"last_ltp_date":"2026-09-04"}
+{
+  "strategy_version": "S1_STRICT_LEVEL_ENTRY_V5",
+  "trades": [],
+  "last_ltp": {},
+  "last_ltp_date": "2026-09-04"
+}
