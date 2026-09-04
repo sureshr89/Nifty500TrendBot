@@ -200,10 +200,11 @@ class DhanLiveClient:
         # A live dashboard must fail fast rather than queue old snapshots.
         # Long HTTP retries can make a 15-second refresh display data from a
         # much earlier scan cycle.
-        for attempt in range(2):
-            response = requests.post(url, headers=self.headers, json=payload, timeout=6)
-            if response.status_code == 429 and attempt < 1:
-                time.sleep(1)
+        for attempt in range(4):
+            response = requests.post(url, headers=self.headers, json=payload, timeout=8)
+            if response.status_code == 429 and attempt < 3:
+                # Respect the provider throttle and use exponential backoff.
+                time.sleep(2 ** attempt)
                 continue
             response.raise_for_status()
             return response.json()
@@ -598,20 +599,16 @@ def trend_check(state):
             client.quotes_with_change(quote_batch, exchange_segment="NSE_EQ")
         )
 
-    # Verify the response on EVERY refresh. A request for 500 instruments does
-    # not guarantee Dhan returned a valid LTP for all 500, so retry only the
-    # missing IDs once before the refresh is marked complete.
+    # Do not issue an immediate second Quote request for missing instruments.
+    # A 15-second Streamlit refresh plus index snapshots can otherwise exceed
+    # Dhan's Quote API throttle. Missing coverage is handled fail-closed below
+    # and retried on the next scheduled refresh.
     missing_stock_ids = [
         sid for sid in unique_universe_ids
         if sid not in live_quotes
         or live_quotes[sid].get("ltp") is None
         or float(live_quotes[sid].get("ltp") or 0) <= 0
     ]
-    if missing_stock_ids:
-        retry_quotes = client.quotes_with_change(
-            missing_stock_ids, exchange_segment="NSE_EQ"
-        )
-        live_quotes.update(retry_quotes)
 
     final_missing_stock_ids = [
         sid for sid in unique_universe_ids
@@ -724,11 +721,9 @@ def trend_check(state):
         or index_quotes[sid].get("ltp") is None
         or float(index_quotes[sid].get("ltp") or 0) <= 0
     ]
-    if missing_index_ids:
-        for segment, ids in index_requests.items():
-            retry_ids = [sid for sid in ids if sid in missing_index_ids]
-            if retry_ids:
-                index_quotes.update(client.quotes_with_change(retry_ids, exchange_segment=segment))
+    # Avoid same-cycle retry requests here; API throttling must not cause a
+    # burst of Quote calls. Missing index coverage remains invalid until the
+    # next scheduled refresh.
 
     final_missing_index_ids = [
         sid for sid in required_index_ids
