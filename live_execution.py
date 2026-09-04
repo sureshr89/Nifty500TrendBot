@@ -93,6 +93,16 @@ class DhanExecutionClient:
         except Exception as exc:
             raise LiveSafetyError(f"Unable to resolve runtime egress IP: {exc}") from exc
 
+    def order_ip_probe(self):
+        """Probe Dhan's order gateway through the exact same proxy/TLS path.
+
+        GET /orders is not an order placement call, but it reaches the same Dhan
+        order API host used by POST /orders. This catches a proxy/IP mismatch
+        before a real-money submission.
+        """
+        self.request("GET", "/orders")
+        return True
+
     def live_readiness(self):
         """Broker-side readiness check. Never exposes credentials."""
         profile=self.profile()
@@ -113,6 +123,9 @@ class DhanExecutionClient:
             raise LiveSafetyError(
                 f"Runtime egress IP {runtime_ip} is not one of the Dhan-approved static IPs"
             )
+        # Verify the exact Dhan order API path through this proxy. If Dhan
+        # rejects the proxy IP here, fail closed instead of claiming READY.
+        self.order_ip_probe()
         return {
             "status":"READY",
             "runtime_ip":runtime_ip,
