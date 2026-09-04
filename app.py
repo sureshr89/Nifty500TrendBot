@@ -1290,7 +1290,7 @@ st.divider()
 st.subheader("🧪 S1 Dry-Run Control")
 st.caption("DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent from this dashboard.")
 
-trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 1) or 2)
+trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 1) or 1)
 loss_limit_ok = float(diag.get("daily_realized_loss", 0) or 0) < float(diag.get("max_daily_loss", 3000) or 3000)
 open_limit_ok = int(diag.get("open_positions", 0) or 0) < int(diag.get("max_open_positions", 2) or 2)
 
