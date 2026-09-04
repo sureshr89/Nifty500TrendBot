@@ -854,12 +854,26 @@ def trend_check(state):
 
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # 14:55 mandatory square-off for every open strategy position.
-    if dt.strftime("%H:%M") >= "14:55":
-        for trade in open_trades:
-            q = live_quotes.get(int(trade["SecurityId"]))
-            if q:
-                trade.update({"status": "CLOSED", "exit_price": q["ltp"], "exit_reason": "AUTO_SQUARE_OFF", "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
+    # 14:55 mandatory square-off. In LIVE mode, never merely mark the local
+    # record closed: first ask Dhan to exit the dedicated bot account, then
+    # update the dashboard only after that API call succeeds.
+    if dt.strftime("%H:%M") >= "14:55" and open_trades:
+        if LIVE_MODE:
+            try:
+                broker = DhanExecutionClient()
+                broker.exit_all_intraday_safely({int(t["SecurityId"]) for t in open_trades})
+            except Exception as exc:
+                market["live_exit_error"] = str(exc)
+            else:
+                for trade in open_trades:
+                    q = live_quotes.get(int(trade["SecurityId"]))
+                    if q:
+                        trade.update({"status": "CLOSED", "exit_price": q["ltp"], "exit_reason": "AUTO_SQUARE_OFF", "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
+        else:
+            for trade in open_trades:
+                q = live_quotes.get(int(trade["SecurityId"]))
+                if q:
+                    trade.update({"status": "CLOSED", "exit_price": q["ltp"], "exit_reason": "AUTO_SQUARE_OFF", "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
         open_trades = [t for t in trades if t["status"] == "OPEN"]
 
     # SL / target monitoring for every open strategy position.
@@ -872,7 +886,7 @@ def trend_check(state):
             reason = "STOP_LOSS" if px <= trade["SL"] else ("TARGET" if px >= trade["target"] else None)
         else:
             reason = "STOP_LOSS" if px >= trade["SL"] else ("TARGET" if px <= trade["target"] else None)
-        if reason:
+        if reason and not LIVE_MODE:
             configured_exit = float(trade["SL"] if reason == "STOP_LOSS" else trade["target"])
             trade.update({
                 "status": "CLOSED",
