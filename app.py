@@ -871,9 +871,9 @@ def trend_check(state):
             })
     open_trades = [t for t in trades if t["status"] == "OPEN"]
 
-    # Final dry-run/live safety limits. These are independent hard gates,
+    # Final dry-run safety limits. One trade per day also means only one simultaneous position is needed.
     # in addition to the strategy signal itself.
-    MAX_OPEN_TRADES = 2
+    MAX_OPEN_TRADES = 1
     MAX_TRADES_PER_DAY = 1
     MAX_DAILY_LOSS = 3000.0
 
@@ -1309,16 +1309,16 @@ st.caption("DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent
 
 trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 1) or 1)
 loss_limit_ok = float(diag.get("daily_realized_loss", 0) or 0) < float(diag.get("max_daily_loss", 3000) or 3000)
-open_limit_ok = int(diag.get("open_positions", 0) or 0) < int(diag.get("max_open_positions", 2) or 2)
+open_limit_ok = int(diag.get("open_positions", 0) or 0) < 1
 
 cards([
     ("Mode", "🧪 DRY-RUN"),
     ("Trades Today", f"{diag.get('trades_today', 0)} / {diag.get('max_trades_per_day', 1)}"),
     ("Daily Loss", f"₹{float(diag.get('daily_realized_loss', 0) or 0):,.2f} / ₹{float(diag.get('max_daily_loss', 3000) or 3000):,.0f}"),
-    ("Open Positions", f"{diag.get('open_positions', 0)} / {diag.get('max_open_positions', 2)}"),
+    ("Open Positions", f"{diag.get('open_positions', 0)} / 1"),
     ("Trade Limit", "🟢 OK" if trade_limit_ok else "🔴 BLOCKED"),
     ("Loss Limit", "🟢 OK" if loss_limit_ok else "🔴 BLOCKED"),
-    ("Position Limit", "🟢 OK" if open_limit_ok else "🔴 BLOCKED"),
+    ("Position Limit", "🟢 OK" if int(diag.get("open_positions", 0) or 0) < 1 else "🔴 BLOCKED"),
     ("New Entry Gate", "🟢 READY" if diag.get("daily_limits_ok") and diag.get("entry_window") and diag.get("breadth_ok") else "🔴 BLOCKED"),
 ], 3)
 
@@ -1651,4 +1651,4 @@ with st.expander("📥 EOD / Full 360° Analysis Download",expanded=False):
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-st.caption("Live and closed trades are not deleted by this dashboard. This update only adds mobile-friendly display, analysis and downloads; entry, exit, SL, target, timing, sector filtering and risk logic remain unchanged.")
+st.caption("Live and closed trades are not deleted by this dashboard. Current dry-run limits: maximum 1 trade per day, maximum 1 open position, ₹3,000 daily loss cap; entry, exit, SL, target, timing and sector filters follow the current S1 rules.")
