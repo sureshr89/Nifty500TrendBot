@@ -1246,6 +1246,11 @@ st.caption("Live Dhan monitoring • S1 LIVE execution armed" if LIVE_MODE else 
 try:
     state=load_premarket_state()
     market,trades=trend_check(state)
+    if LIVE_MODE:
+        try:
+            market["broker_readiness"] = DhanExecutionClient().live_readiness()
+        except Exception as exc:
+            market["broker_readiness"] = {"status": "BLOCKED", "error": str(exc)}
     live_status="🟢 ACTIVE"
 except Exception as exc:
     state={}; market={}; trades=[]
@@ -1410,15 +1415,19 @@ with st.expander("🎯 S1 — Strategy Rules",expanded=False):
 # S1 DRY-RUN CONTROL PANEL — visible so tomorrow's test takes only minutes.
 diag = market.get("entry_diagnostics", {})
 st.divider()
-st.subheader("🧪 S1 Dry-Run Control")
+st.subheader("🔴 S1 Live Control" if LIVE_MODE else "🧪 S1 Dry-Run Control")
 st.caption("LIVE MODE • Real Dhan orders can be sent after all execution safety gates pass." if LIVE_MODE else "DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent from this dashboard.")
 
 trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 1) or 1)
 loss_limit_ok = float(diag.get("daily_realized_loss", 0) or 0) < float(diag.get("max_daily_loss", 3000) or 3000)
 open_limit_ok = int(diag.get("open_positions", 0) or 0) < 1
 
+_broker_readiness = market.get("broker_readiness", {}) if isinstance(market, dict) else {}
+_broker_ready = str(_broker_readiness.get("status", "")).upper() == "READY"
+
 cards([
     ("Mode", "🔴 LIVE" if LIVE_MODE else "🧪 DRY-RUN"),
+    ("Broker", "🟢 READY" if (LIVE_MODE and _broker_ready) else ("🔴 BLOCKED" if LIVE_MODE else "🧪 DRY-RUN")),
     ("Trades Today", f"{diag.get('trades_today', 0)} / {diag.get('max_trades_per_day', 1)}"),
     ("Daily Loss", f"₹{float(diag.get('daily_realized_loss', 0) or 0):,.2f} / ₹{float(diag.get('max_daily_loss', 3000) or 3000):,.0f}"),
     ("Open Positions", f"{diag.get('open_positions', 0)} / 1"),
@@ -1429,7 +1438,12 @@ cards([
 ], 3)
 
 with st.expander("🔎 S1 Entry Diagnostics", expanded=False):
-    st.caption("Exact live-data and execution gates for the current scan cycle. In DRY-RUN no broker order is sent; in LIVE mode Dhan execution requires every safety gate.")
+    st.caption("Exact live-data and execution gates for the current scan cycle. In DRY-RUN no broker order is sent; in LIVE mode the Dhan token, client identity and actual runtime IP must all pass before an order can be sent.")
+    if LIVE_MODE:
+        if _broker_ready:
+            st.success("Broker readiness: READY — token/client identity and current runtime IP passed the live check.")
+        else:
+            st.error("Broker readiness: BLOCKED — " + str(_broker_readiness.get("error", "Unknown live broker readiness error")))
     cards([
         ("Market Mode", str(diag.get("mode", "UNKNOWN"))),
         ("Candidates Checked", diag.get("candidates", 0)),
@@ -1758,4 +1772,4 @@ with st.expander("📥 EOD / Full 360° Analysis Download",expanded=False):
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-st.caption("Live and closed trades are not deleted by this dashboard. Current dry-run limits: maximum 1 trade per day, maximum 1 open position, ₹3,000 daily loss cap; entry, exit, SL, target, timing and sector filters follow the current S1 rules.")
+st.caption("Live and closed trades are not deleted by this dashboard. Limits: maximum 1 trade per day, maximum 1 open position, ₹3,000 daily loss cap; in LIVE mode every order additionally requires broker token/client and actual runtime-IP readiness.")
