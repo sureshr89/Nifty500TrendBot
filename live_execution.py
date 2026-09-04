@@ -1,6 +1,7 @@
 """Professional fail-closed Dhan live execution layer for NIFTY 500 S1."""
 from __future__ import annotations
 import math, os, time
+from urllib.parse import quote
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -48,8 +49,25 @@ class DhanExecutionClient:
         if os.getenv("LIVE_TRADING_CONFIRMATION","")!=LIVE_CONFIRMATION: raise LiveSafetyError("Real-money confirmation gate not satisfied")
         if os.getenv("LIVE_ACCOUNT_DEDICATED_TO_BOT","false").lower()!="true": raise LiveSafetyError("Dedicated bot-account gate not satisfied")
         self.headers={"access-token":self.token,"Content-Type":"application/json","Accept":"application/json"}
+        self.proxy_host=os.getenv("PROXY_HOST","").strip()
+        self.proxy_port=os.getenv("PROXY_PORT","443").strip()
+        self.proxy_username=os.getenv("PROXY_USERNAME","").strip()
+        self.proxy_password=os.getenv("PROXY_PASSWORD","").strip()
+        self.proxy_ip=os.getenv("PROXY_IP","").strip()
+        if not all((self.proxy_host, self.proxy_port, self.proxy_username, self.proxy_password, self.proxy_ip)):
+            raise LiveSafetyError("Static proxy configuration missing")
+        if not self.proxy_ip.count(".") == 3:
+            raise LiveSafetyError("Configured proxy IP is invalid")
+        proxy_url=(
+            f"https://{quote(self.proxy_username, safe='')}:{quote(self.proxy_password, safe='')}"
+            f"@{self.proxy_host}:{self.proxy_port}"
+        )
+        self.proxies={"http":proxy_url,"https":proxy_url}
+        self.session=requests.Session()
+        # Fail closed: never silently bypass the purchased static proxy.
+        self.session.trust_env=False
     def request(self,method,path,payload=None,allow_not_found=False):
-        r=requests.request(method,API+path,headers=self.headers,json=payload,timeout=12)
+        r=self.session.request(method,API+path,headers=self.headers,json=payload,timeout=12,proxies=self.proxies)
         if allow_not_found and r.status_code == 404:
             return None
         if r.status_code>=400: raise LiveSafetyError(f"Dhan {method} {path} failed {r.status_code}: {r.text[:300]}")
@@ -64,7 +82,7 @@ class DhanExecutionClient:
 
     def runtime_egress_ip(self):
         try:
-            r=requests.get("https://api.ipify.org", params={"format":"json"}, timeout=5)
+            r=self.session.get("https://api.ipify.org", params={"format":"json"}, timeout=8, proxies=self.proxies)
             r.raise_for_status()
             ip=str((r.json() or {}).get("ip","")).strip()
             if not ip:
@@ -85,6 +103,12 @@ class DhanExecutionClient:
         runtime_ip=self.runtime_egress_ip()
         approved={str(ips.get("primaryIP") or "").strip(), str(ips.get("secondaryIP") or "").strip()}
         approved.discard("")
+        if self.proxy_ip not in approved:
+            raise LiveSafetyError("Configured proxy IP is not one of the Dhan-approved static IPs")
+        if runtime_ip != self.proxy_ip:
+            raise LiveSafetyError(
+                f"Proxy egress verification mismatch: expected {self.proxy_ip}, got {runtime_ip}"
+            )
         if runtime_ip not in approved:
             raise LiveSafetyError(
                 f"Runtime egress IP {runtime_ip} is not one of the Dhan-approved static IPs"
