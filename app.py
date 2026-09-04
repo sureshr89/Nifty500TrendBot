@@ -1306,6 +1306,15 @@ if LIVE_MODE:
         )
         if _s2.get("state") == "IDLE":
             if st.button("🔴 BUY 1 RPOWER SHARE — ONE-TIME LIVE TEST", disabled=not _ready, key="s2_buy_one"):
+                # Persist the click immediately so the user gets instant visual
+                # feedback even while the broker/proxy request is in progress.
+                _s2.update({"state": "BUY_SUBMITTING", "submit_time": datetime.now(IST).isoformat()})
+                st.session_state.s2_test = _s2
+                try:
+                    store.save_s2_test_state(_s2)
+                except Exception:
+                    pass
+                st.info("Submitting 1-share BUY request to Dhan… please wait.")
                 try:
                     _broker = DhanExecutionClient()
                     _cid = f"S2T-{datetime.now(IST):%y%m%d}-RPOWER-B"
