@@ -210,13 +210,13 @@ class DhanExecutionClient:
             "validity": "DAY",
             "securityId": str(int(sid)),
             "quantity": 1,
+            # Dhan's regular MARKET order contract expects these as numeric
+            # fields. Do not send Super/BO-only fields on /orders.
             "disclosedQuantity": 0,
-            "price": 0.0,
-            "triggerPrice": 0.0,
+            "price": 0,
+            "triggerPrice": 0,
             "afterMarketOrder": False,
-            "amoTime": "",
-            "boProfitValue": 0.0,
-            "boStopLossValue": 0.0,
+            "amoTime": "OPEN",
         })
 
     def regular_order_by_id(self, order_id):
