@@ -1272,6 +1272,12 @@ mode=market.get("mode","NEUTRAL")
 if "s2_test" not in st.session_state:
     st.session_state.s2_test = {"state": "IDLE"}
 
+# An ERROR is from the previous explicit button attempt only. Reset the
+# one-time test state on the next rerun so a corrected payload can be retried
+# manually; this never submits an order automatically.
+if st.session_state.s2_test.get("state") == "ERROR":
+    st.session_state.s2_test = {"state": "IDLE"}
+
 _s2 = st.session_state.s2_test
 _rpower = next(
     (r for r in (market.get("breadth_universe_rows") or [])
