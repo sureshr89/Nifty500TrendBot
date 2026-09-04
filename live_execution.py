@@ -59,7 +59,7 @@ class DhanExecutionClient:
         if not self.proxy_ip.count(".") == 3:
             raise LiveSafetyError("Configured proxy IP is invalid")
         proxy_url=(
-            f"https://{quote(self.proxy_username, safe='')}:{quote(self.proxy_password, safe='')}"
+            f"http://{quote(self.proxy_username, safe='')}:{quote(self.proxy_password, safe='')}"
             f"@{self.proxy_host}:{self.proxy_port}"
         )
         self.proxies={"http":proxy_url,"https":proxy_url}
@@ -239,15 +239,15 @@ class DhanExecutionClient:
             "quantity": 1,
             # Dhan's regular MARKET order contract expects these as numeric
             # fields. Do not send Super/BO-only fields on /orders.
-            "disclosedQuantity": 0,
-            "price": 0.0,
-            "triggerPrice": 0.0,
+            # Match Dhan's documented MARKET order example exactly.
+            # Empty optional values are intentional for a normal MARKET order.
+            "disclosedQuantity": "",
+            "price": "",
+            "triggerPrice": "",
             "afterMarketOrder": False,
-            # Not an AMO. Keep AMO timing empty rather than supplying an AMO
-            # enum value on a normal market-hours order.
             "amoTime": "",
-            "boProfitValue": 0.0,
-            "boStopLossValue": 0.0,
+            "boProfitValue": "",
+            "boStopLossValue": "",
         })
 
     def regular_order_by_id(self, order_id):
