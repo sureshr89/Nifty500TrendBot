@@ -52,6 +52,49 @@ class DhanExecutionClient:
             return None
         if r.status_code>=400: raise LiveSafetyError(f"Dhan {method} {path} failed {r.status_code}: {r.text[:300]}")
         return r.json() if r.text.strip() else {}
+    def profile(self):
+        x=self.request("GET","/profile")
+        return x if isinstance(x,dict) else {}
+
+    def configured_ips(self):
+        x=self.request("GET","/ip/getIP")
+        return x if isinstance(x,dict) else {}
+
+    def runtime_egress_ip(self):
+        try:
+            r=requests.get("https://api.ipify.org", params={"format":"json"}, timeout=5)
+            r.raise_for_status()
+            ip=str((r.json() or {}).get("ip","")).strip()
+            if not ip:
+                raise LiveSafetyError("Unable to resolve runtime egress IP")
+            return ip
+        except LiveSafetyError:
+            raise
+        except Exception as exc:
+            raise LiveSafetyError(f"Unable to resolve runtime egress IP: {exc}") from exc
+
+    def live_readiness(self):
+        """Broker-side readiness check. Never exposes credentials."""
+        profile=self.profile()
+        broker_client=str(profile.get("dhanClientId","")).strip()
+        if broker_client and broker_client != self.client_id:
+            raise LiveSafetyError("Dhan token belongs to a different client ID")
+        ips=self.configured_ips()
+        runtime_ip=self.runtime_egress_ip()
+        approved={str(ips.get("primaryIP") or "").strip(), str(ips.get("secondaryIP") or "").strip()}
+        approved.discard("")
+        if runtime_ip not in approved:
+            raise LiveSafetyError(
+                f"Runtime egress IP {runtime_ip} is not one of the Dhan-approved static IPs"
+            )
+        return {
+            "status":"READY",
+            "runtime_ip":runtime_ip,
+            "primary_ip":ips.get("primaryIP"),
+            "secondary_ip":ips.get("secondaryIP"),
+            "token_validity":profile.get("tokenValidity"),
+        }
+
     def positions(self):
         x=self.request("GET","/positions"); return x if isinstance(x,list) else []
     def orders(self):
@@ -107,6 +150,9 @@ class DhanExecutionClient:
     def place_super_order(self,sid,side,quantity,entry,target,stop,cid,owned_ids):
         if force_exit_due(): raise LiveSafetyError("Force-exit time reached")
         if not in_entry_window(): raise LiveSafetyError("Outside entry window")
+        # Real broker-side readiness: token/client identity and the actual
+        # runtime egress IP must match one of the IPs configured at Dhan.
+        self.live_readiness()
         # Restart-safe idempotency: query correlation ID before any new order.
         existing = self.get_order_by_correlation(cid)
         if existing:
