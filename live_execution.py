@@ -42,7 +42,9 @@ class DhanExecutionClient:
         self.client_id=os.getenv("DHAN_CLIENT_ID","").strip(); self.token=os.getenv("DHAN_ACCESS_TOKEN","").strip()
         if not self.client_id or not self.token: raise LiveSafetyError("Dhan credentials missing")
         if os.getenv("LIVE_TRADING_ENABLED","false").lower()!="true": raise LiveSafetyError("LIVE_TRADING_ENABLED is not true")
-        if os.getenv("LIVE_STATIC_IP_APPROVED","false").lower()!="true": raise LiveSafetyError("Static-IP execution not approved")
+        # Do not trust a manual boolean for real-money execution. Dhan readiness
+        # below verifies the actual runtime egress IP against Dhan's configured
+        # PRIMARY/SECONDARY IPs before any order is allowed.
         if os.getenv("LIVE_TRADING_CONFIRMATION","")!=LIVE_CONFIRMATION: raise LiveSafetyError("Real-money confirmation gate not satisfied")
         if os.getenv("LIVE_ACCOUNT_DEDICATED_TO_BOT","false").lower()!="true": raise LiveSafetyError("Dedicated bot-account gate not satisfied")
         self.headers={"access-token":self.token,"Content-Type":"application/json","Accept":"application/json"}
