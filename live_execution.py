@@ -187,6 +187,34 @@ class DhanExecutionClient:
         self.assert_capacity(owned_ids)
         if self.has_pending_or_open_for_security(sid): raise LiveSafetyError("Duplicate/open/pending order blocked")
         return self.request("POST","/super/orders",{"dhanClientId":self.client_id,"correlationId":cid,"transactionType":side,"exchangeSegment":"NSE_EQ","productType":"INTRADAY","orderType":"LIMIT","securityId":str(int(sid)),"quantity":int(quantity),"price":float(entry),"targetPrice":float(target),"stopLossPrice":float(stop),"trailingJump":0.0})
+    def place_market_order(self, sid, side, quantity, cid):
+        """Explicit one-time market order path for a manually triggered execution test."""
+        if int(quantity) != 1:
+            raise LiveSafetyError("One-time test is restricted to exactly 1 share")
+        if str(side).upper() not in {"BUY", "SELL"}:
+            raise LiveSafetyError("Invalid market-order side")
+        self.live_readiness()
+        existing = self.get_order_by_correlation(cid)
+        if existing:
+            return existing
+        return self.request("POST", "/orders", {
+            "dhanClientId": self.client_id,
+            "correlationId": str(cid)[:30],
+            "transactionType": str(side).upper(),
+            "exchangeSegment": "NSE_EQ",
+            "productType": "INTRADAY",
+            "orderType": "MARKET",
+            "securityId": str(int(sid)),
+            "quantity": 1,
+            "price": 0,
+            "validity": "DAY",
+            "afterMarketOrder": False,
+        })
+
+    def regular_order_by_id(self, order_id):
+        x = self.request("GET", f"/orders/{order_id}")
+        return x if isinstance(x, dict) else {}
+
     def get_order_by_correlation(self,cid):
         return self.request("GET",f"/orders/external/{cid}",allow_not_found=True)
 
