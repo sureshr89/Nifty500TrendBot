@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 IST=ZoneInfo("Asia/Kolkata"); API="https://api.dhan.co/v2"
-MAX_OPEN_POSITIONS=2; MAX_CAPITAL_PER_TRADE=150000.0
+MAX_OPEN_POSITIONS=1; MAX_TRADES_PER_DAY=1; MAX_CAPITAL_PER_TRADE=150000.0
 MIN_RISK_PER_TRADE=1000.0; MAX_RISK_PER_TRADE=1500.0
 ENTRY_START="09:15"; ENTRY_END="13:00"; FORCE_EXIT_TIME="14:55"
 LIVE_CONFIRMATION="I_UNDERSTAND_REAL_MONEY_RISK"
@@ -45,8 +45,10 @@ class DhanExecutionClient:
         if os.getenv("LIVE_STATIC_IP_APPROVED","false").lower()!="true": raise LiveSafetyError("Static-IP execution not approved")
         if os.getenv("LIVE_TRADING_CONFIRMATION","")!=LIVE_CONFIRMATION: raise LiveSafetyError("Real-money confirmation gate not satisfied")
         self.headers={"access-token":self.token,"Content-Type":"application/json","Accept":"application/json"}
-    def request(self,method,path,payload=None):
+    def request(self,method,path,payload=None,allow_not_found=False):
         r=requests.request(method,API+path,headers=self.headers,json=payload,timeout=12)
+        if allow_not_found and r.status_code == 404:
+            return None
         if r.status_code>=400: raise LiveSafetyError(f"Dhan {method} {path} failed {r.status_code}: {r.text[:300]}")
         return r.json() if r.text.strip() else {}
     def positions(self):
@@ -80,11 +82,27 @@ class DhanExecutionClient:
         existing = self.get_order_by_correlation(cid)
         if existing:
             return existing
+        self.assert_daily_trade_limit()
         self.assert_capacity(owned_ids)
         if self.has_pending_or_open_for_security(sid): raise LiveSafetyError("Duplicate/open/pending order blocked")
         return self.request("POST","/super/orders",{"dhanClientId":self.client_id,"correlationId":cid,"transactionType":side,"exchangeSegment":"NSE_EQ","productType":"INTRADAY","orderType":"LIMIT","securityId":str(int(sid)),"quantity":int(quantity),"price":float(entry),"targetPrice":float(target),"stopLossPrice":float(stop),"trailingJump":0.0})
     def get_order_by_correlation(self,cid):
-        return self.request("GET",f"/orders/external/{cid}")
+        return self.request("GET",f"/orders/external/{cid}",allow_not_found=True)
+
+    def bot_super_orders_today(self):
+        prefix = f"S1-{datetime.now(IST):%y%m%d}-"
+        return [
+            o for o in self.super_orders()
+            if str(o.get("correlationId", "")).startswith(prefix)
+        ]
+
+    def assert_daily_trade_limit(self):
+        # Dhan's Super Order book is for the current trading day. Count every
+        # bot entry attempt with today's deterministic S1 correlation prefix,
+        # including rejected/cancelled attempts, so the bot can never keep
+        # retrying into multiple real entries after a restart.
+        if len(self.bot_super_orders_today()) >= MAX_TRADES_PER_DAY:
+            raise LiveSafetyError(f"Maximum {MAX_TRADES_PER_DAY} live bot trade per day reached")
     def confirm_super_order(self,order_id,timeout_seconds=30):
         # Never mark a trade open merely because Dhan accepted the request.
         deadline=time.time()+timeout_seconds; terminal={"REJECTED","CANCELLED","EXPIRED"}
