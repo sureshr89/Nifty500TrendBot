@@ -197,6 +197,9 @@ class DhanExecutionClient:
         existing = self.get_order_by_correlation(cid)
         if existing:
             return existing
+        # Match Dhan v2's regular-order request structure explicitly. Keeping
+        # zero-valued order fields in the payload avoids broker-side validation
+        # failures caused by omitted disclosed/trigger fields.
         return self.request("POST", "/orders", {
             "dhanClientId": self.client_id,
             "correlationId": str(cid)[:30],
@@ -204,11 +207,16 @@ class DhanExecutionClient:
             "exchangeSegment": "NSE_EQ",
             "productType": "INTRADAY",
             "orderType": "MARKET",
+            "validity": "DAY",
             "securityId": str(int(sid)),
             "quantity": 1,
-            "price": 0,
-            "validity": "DAY",
+            "disclosedQuantity": 0,
+            "price": 0.0,
+            "triggerPrice": 0.0,
             "afterMarketOrder": False,
+            "amoTime": "",
+            "boProfitValue": 0.0,
+            "boStopLossValue": 0.0,
         })
 
     def regular_order_by_id(self, order_id):
