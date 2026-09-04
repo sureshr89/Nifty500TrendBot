@@ -1269,14 +1269,15 @@ mode=market.get("mode","NEUTRAL")
 # ---------------- One-time explicit live execution test ----------------
 # This path is intentionally separate from S1. It can only run after the user
 # presses the button, uses exactly one RPOWER share, and never retries a BUY.
-if "s2_test" not in st.session_state:
-    st.session_state.s2_test = {"state": "IDLE"}
-
-# An ERROR is from the previous explicit button attempt only. Reset the
-# one-time test state on the next rerun so a corrected payload can be retried
-# manually; this never submits an order automatically.
-if st.session_state.s2_test.get("state") == "ERROR":
-    st.session_state.s2_test = {"state": "IDLE"}
+# Persist S2 test state in the same durable store used by the bot so a
+# Streamlit process restart/rerun cannot silently lose the button result.
+try:
+    _s2 = store.get_s2_test_state()
+except Exception:
+    _s2 = st.session_state.get("s2_test", {"state": "IDLE"})
+if not isinstance(_s2, dict):
+    _s2 = {"state": "IDLE"}
+st.session_state.s2_test = _s2
 
 _s2 = st.session_state.s2_test
 _rpower = next(
@@ -1312,11 +1313,19 @@ if LIVE_MODE:
                         "buy_cid": _cid,
                     })
                     st.session_state.s2_test = _s2
+                    try:
+                        store.save_s2_test_state(_s2)
+                    except Exception:
+                        pass
                     st.success(f"BUY request sent to Dhan. Response: {_order}")
                     st.rerun()
                 except Exception as _exc:
                     _s2.update({"state": "ERROR", "error": str(_exc)})
                     st.session_state.s2_test = _s2
+                    try:
+                        store.save_s2_test_state(_s2)
+                    except Exception:
+                        pass
                     st.error(f"S2 BUY failed: {_exc}")
         else:
             st.info(f"S2 test state: {_s2.get('state')}")
