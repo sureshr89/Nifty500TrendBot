@@ -24,9 +24,9 @@ IST = ZoneInfo("Asia/Kolkata")
 REPO = "sureshr89/Nifty500TrendBot"
 STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
-STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V6_RESET_LIVE_BASELINE"
+STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V7_ENTRY_WINDOW_1400"
 
-APP_BUILD = "execution-v2-static-proxy-egress-verification"
+APP_BUILD = "execution-v3-entry-window-1400"
 
 # Streamlit Secrets are not automatically exposed as process environment
 # variables. Mirror only the explicitly configured execution values so the
@@ -417,7 +417,7 @@ TRADE_DATA_START = "09:15"
 def in_entry_window(dt):
     hhmm = dt.strftime("%H:%M")
     # All new S1 trade decisions/data begin from the regular market open at 09:15 IST.
-    return TRADE_DATA_START <= hhmm < "13:00"
+    return TRADE_DATA_START <= hhmm < "14:00"
 
 def _github_trade_state_url():
     return f"https://api.github.com/repos/{REPO}/contents/paper_trades.json"
