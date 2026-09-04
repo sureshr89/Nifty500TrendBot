@@ -862,7 +862,7 @@ def trend_check(state):
     # Final dry-run/live safety limits. These are independent hard gates,
     # in addition to the strategy signal itself.
     MAX_OPEN_TRADES = 2
-    MAX_TRADES_PER_DAY = 2
+    MAX_TRADES_PER_DAY = 1
     MAX_DAILY_LOSS = 3000.0
 
     def _same_trading_day(trade):
@@ -1290,13 +1290,13 @@ st.divider()
 st.subheader("🧪 S1 Dry-Run Control")
 st.caption("DRY-RUN MODE • Dashboard simulation only • No Dhan order is sent from this dashboard.")
 
-trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 2) or 2)
+trade_limit_ok = int(diag.get("trades_today", 0) or 0) < int(diag.get("max_trades_per_day", 1) or 2)
 loss_limit_ok = float(diag.get("daily_realized_loss", 0) or 0) < float(diag.get("max_daily_loss", 3000) or 3000)
 open_limit_ok = int(diag.get("open_positions", 0) or 0) < int(diag.get("max_open_positions", 2) or 2)
 
 cards([
     ("Mode", "🧪 DRY-RUN"),
-    ("Trades Today", f"{diag.get('trades_today', 0)} / {diag.get('max_trades_per_day', 2)}"),
+    ("Trades Today", f"{diag.get('trades_today', 0)} / {diag.get('max_trades_per_day', 1)}"),
     ("Daily Loss", f"₹{float(diag.get('daily_realized_loss', 0) or 0):,.2f} / ₹{float(diag.get('max_daily_loss', 3000) or 3000):,.0f}"),
     ("Open Positions", f"{diag.get('open_positions', 0)} / {diag.get('max_open_positions', 2)}"),
     ("Trade Limit", "🟢 OK" if trade_limit_ok else "🔴 BLOCKED"),
