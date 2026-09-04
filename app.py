@@ -1329,6 +1329,16 @@ if LIVE_MODE:
                     st.error(f"S2 BUY failed: {_exc}")
         else:
             st.info(f"S2 test state: {_s2.get('state')}")
+            if _s2.get("state") == "ERROR":
+                st.error(f"Last S2 error: {_s2.get('error', 'Unknown error')}")
+                if st.button("🔄 RESET S2 TEST AND TRY AGAIN", key="s2_reset"):
+                    _s2 = {"state": "IDLE"}
+                    st.session_state.s2_test = _s2
+                    try:
+                        store.save_s2_test_state(_s2)
+                    except Exception:
+                        pass
+                    st.rerun()
             _buy_time = _s2.get("buy_time")
             if _s2.get("state") == "BUY_SENT" and _buy_time:
                 try:
