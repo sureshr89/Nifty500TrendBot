@@ -236,11 +236,9 @@ class DhanExecutionClient:
             "orderType": "MARKET",
             "validity": "DAY",
             "securityId": str(int(sid)),
+            # Dhan documents quantity as an integer and shows empty strings
+            # for the non-applicable MARKET/AMO fields.
             "quantity": 1,
-            # Dhan's regular MARKET order contract expects these as numeric
-            # fields. Do not send Super/BO-only fields on /orders.
-            # Match Dhan's documented MARKET order example exactly.
-            # Empty optional values are intentional for a normal MARKET order.
             "disclosedQuantity": "",
             "price": "",
             "triggerPrice": "",
