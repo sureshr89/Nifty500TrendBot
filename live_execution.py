@@ -44,6 +44,7 @@ class DhanExecutionClient:
         if os.getenv("LIVE_TRADING_ENABLED","false").lower()!="true": raise LiveSafetyError("LIVE_TRADING_ENABLED is not true")
         if os.getenv("LIVE_STATIC_IP_APPROVED","false").lower()!="true": raise LiveSafetyError("Static-IP execution not approved")
         if os.getenv("LIVE_TRADING_CONFIRMATION","")!=LIVE_CONFIRMATION: raise LiveSafetyError("Real-money confirmation gate not satisfied")
+        if os.getenv("LIVE_ACCOUNT_DEDICATED_TO_BOT","false").lower()!="true": raise LiveSafetyError("Dedicated bot-account gate not satisfied")
         self.headers={"access-token":self.token,"Content-Type":"application/json","Accept":"application/json"}
     def request(self,method,path,payload=None,allow_not_found=False):
         r=requests.request(method,API+path,headers=self.headers,json=payload,timeout=12)
