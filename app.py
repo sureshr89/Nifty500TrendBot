@@ -876,6 +876,42 @@ def trend_check(state):
                     trade.update({"status": "CLOSED", "exit_price": q["ltp"], "exit_reason": "AUTO_SQUARE_OFF", "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")})
         open_trades = [t for t in trades if t["status"] == "OPEN"]
 
+    # In LIVE mode, Dhan's Super Order is authoritative for SL/target exits.
+    # Reconcile the local trade record from the broker before displaying P&L.
+    if LIVE_MODE and open_trades:
+        try:
+            broker = DhanExecutionClient()
+            broker_orders = {
+                str(o.get("orderId")): o
+                for o in broker.super_orders()
+                if isinstance(o, dict)
+            }
+            for trade in open_trades:
+                oid = str(trade.get("broker_order_id") or "")
+                order = broker_orders.get(oid)
+                if not order or str(order.get("orderStatus", "")).upper() != "CLOSED":
+                    continue
+                reason = "BROKER_CLOSED"
+                for leg in order.get("legDetails", []) or []:
+                    name = str(leg.get("legName", "")).upper()
+                    status = str(leg.get("orderStatus", "")).upper()
+                    if "TARGET" in name and status in {"TRIGGERED", "TRADED", "CLOSED"}:
+                        reason = "TARGET"
+                        break
+                    if "STOP" in name and status in {"TRIGGERED", "TRADED", "CLOSED"}:
+                        reason = "STOP_LOSS"
+                        break
+                configured_exit = float(trade["target"] if reason == "TARGET" else (trade["SL"] if reason == "STOP_LOSS" else live_quotes.get(int(trade["SecurityId"]), {}).get("ltp", trade["entry_price"])))
+                trade.update({
+                    "status": "CLOSED",
+                    "exit_price": configured_exit,
+                    "exit_reason": reason,
+                    "exit_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")
+                })
+        except Exception as exc:
+            market["broker_reconcile_error"] = str(exc)
+        open_trades = [t for t in trades if t["status"] == "OPEN"]
+
     # SL / target monitoring for every open strategy position.
     for trade in list(open_trades):
         q = live_quotes.get(int(trade["SecurityId"]))
