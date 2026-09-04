@@ -26,7 +26,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V6_RESET_LIVE_BASELINE"
 
-APP_BUILD = "execution-v1-s1-rr1-trade1-daily3000-broker-confirmed"
+APP_BUILD = "execution-v2-static-proxy-egress-verification"
 
 # Streamlit Secrets are not automatically exposed as process environment
 # variables. Mirror only the explicitly configured execution values so the
