@@ -240,10 +240,14 @@ class DhanExecutionClient:
             # Dhan's regular MARKET order contract expects these as numeric
             # fields. Do not send Super/BO-only fields on /orders.
             "disclosedQuantity": 0,
-            "price": 0,
-            "triggerPrice": 0,
+            "price": 0.0,
+            "triggerPrice": 0.0,
             "afterMarketOrder": False,
-            "amoTime": "OPEN",
+            # Not an AMO. Keep AMO timing empty rather than supplying an AMO
+            # enum value on a normal market-hours order.
+            "amoTime": "",
+            "boProfitValue": 0.0,
+            "boStopLossValue": 0.0,
         })
 
     def regular_order_by_id(self, order_id):
