@@ -26,7 +26,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V7_ENTRY_WINDOW_1400"
 
-APP_BUILD = "execution-v3-entry-window-1400"
+APP_BUILD = "execution-v4-s2-one-share-rpower-test"
 
 # Streamlit Secrets are not automatically exposed as process environment
 # variables. Mirror only the explicitly configured execution values so the
@@ -1265,6 +1265,86 @@ except Exception as exc:
 buy_rows=state.get("buy_set",[])
 sell_rows=state.get("sell_set",[])
 mode=market.get("mode","NEUTRAL")
+
+# ---------------- One-time explicit live execution test ----------------
+# This path is intentionally separate from S1. It can only run after the user
+# presses the button, uses exactly one RPOWER share, and never retries a BUY.
+if "s2_test" not in st.session_state:
+    st.session_state.s2_test = {"state": "IDLE"}
+
+_s2 = st.session_state.s2_test
+_rpower = next(
+    (r for r in (market.get("breadth_universe_rows") or [])
+     if str(r.get("Symbol", "")).upper() == "RPOWER"),
+    None,
+)
+
+if LIVE_MODE:
+    st.subheader("🧪 S2 — One-Time Live Execution Test")
+    if not _rpower:
+        st.error("RPOWER could not be resolved from the current NIFTY 500 universe; no test order can be sent.")
+    else:
+        _sid = int(_rpower["SecurityId"])
+        _quote = (market.get("live_quotes") or {}).get(_sid) or {}
+        _ready = (market.get("broker_readiness") or {}).get("status") == "READY"
+        st.caption(
+            f"Explicit test only • RPOWER • Security ID {_sid} • 1 share • "
+            f"current LTP ₹{_quote.get('ltp', '—')} • BUY once, then exit after 5 minutes."
+        )
+        if _s2.get("state") == "IDLE":
+            if st.button("🔴 BUY 1 RPOWER SHARE — ONE-TIME LIVE TEST", disabled=not _ready, key="s2_buy_one"):
+                try:
+                    _broker = DhanExecutionClient()
+                    _cid = f"S2T-{datetime.now(IST):%y%m%d}-RPOWER-B"
+                    _order = _broker.place_market_order(_sid, "BUY", 1, _cid)
+                    _s2.update({
+                        "state": "BUY_SENT",
+                        "sid": _sid,
+                        "symbol": "RPOWER",
+                        "buy_order": _order,
+                        "buy_time": datetime.now(IST).isoformat(),
+                        "buy_cid": _cid,
+                    })
+                    st.session_state.s2_test = _s2
+                    st.success(f"BUY request sent to Dhan. Response: {_order}")
+                    st.rerun()
+                except Exception as _exc:
+                    _s2.update({"state": "ERROR", "error": str(_exc)})
+                    st.session_state.s2_test = _s2
+                    st.error(f"S2 BUY failed: {_exc}")
+        else:
+            st.info(f"S2 test state: {_s2.get('state')}")
+            _buy_time = _s2.get("buy_time")
+            if _s2.get("state") == "BUY_SENT" and _buy_time:
+                try:
+                    _elapsed = (datetime.now(IST) - datetime.fromisoformat(_buy_time)).total_seconds()
+                except Exception:
+                    _elapsed = 0
+                _remaining = max(0, int(300 - _elapsed))
+                st.caption(f"Auto-exit countdown: {_remaining} seconds")
+                if _elapsed >= 300:
+                    try:
+                        _broker = DhanExecutionClient()
+                        _positions = _broker.positions()
+                        _net = 0
+                        for _p in _positions:
+                            if str(_p.get("securityId", "")) == str(_s2.get("sid")):
+                                _net += int(float(_p.get("netQty", _p.get("netQuantity", 0)) or 0))
+                        if _net > 0:
+                            _sell_cid = f"S2T-{datetime.now(IST):%y%m%d}-RPOWER-S"
+                            _sell = _broker.place_market_order(_s2["sid"], "SELL", 1, _sell_cid)
+                            _s2.update({"state": "EXIT_SENT", "sell_order": _sell, "sell_time": datetime.now(IST).isoformat()})
+                            st.success(f"5-minute exit SELL sent to Dhan. Response: {_sell}")
+                        else:
+                            _s2.update({"state": "NO_OPEN_POSITION_TO_EXIT"})
+                            st.warning("5-minute check found no open RPOWER intraday position, so no SELL was sent.")
+                        st.session_state.s2_test = _s2
+                    except Exception as _exc:
+                        _s2.update({"state": "EXIT_ERROR", "error": str(_exc)})
+                        st.session_state.s2_test = _s2
+                        st.error(f"S2 exit failed: {_exc}")
+            if _s2.get("state") == "EXIT_SENT":
+                st.success("S2 one-time test completed. No further S2 BUY is allowed in this Streamlit session.")
 
 def pnl(t):
     q=float(t.get("quantity",0) or 0); e=float(t.get("entry_price",0) or 0)
