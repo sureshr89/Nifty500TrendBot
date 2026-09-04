@@ -25,7 +25,7 @@ STATE_URL = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json
 STATE_URL_CACHE_BUST = f"https://raw.githubusercontent.com/{REPO}/bot-state/scan_state.json"
 STRATEGY_STATE_VERSION = "S1_STRICT_LEVEL_ENTRY_V5"
 
-APP_BUILD = "dry-run-v1-s1-rr1-max2-trades2-daily3000"
+APP_BUILD = "dry-run-v2-s1-rr1-max2-trades1-daily3000-opens"
 
 st.set_page_config(page_title="NIFTY 500 Trend Bot", page_icon="📈", layout="wide")
 st_autorefresh(interval=15_000, key="trend_dashboard_refresh")
@@ -247,7 +247,17 @@ class DhanLiveClient:
                         pdc = close
                 except (TypeError, ValueError):
                     pass
-            out[int(sid)] = {"ltp": ltp, "previous_close": pdc}
+            ohlc = row.get("ohlc") or {}
+            today_open = row.get("open")
+            if today_open in (None, ""):
+                today_open = ohlc.get("open")
+            try:
+                today_open = float(today_open) if today_open not in (None, "") else None
+                if today_open is not None and today_open <= 0:
+                    today_open = None
+            except (TypeError, ValueError):
+                today_open = None
+            out[int(sid)] = {"ltp": ltp, "previous_close": pdc, "open": today_open}
         return out
 
 
@@ -590,6 +600,8 @@ def trend_check(state):
             q = live_quotes.get(int(stock.get("SecurityId")))
             if q:
                 stock["LTP"] = q["ltp"]
+                stock["Today's Open"] = q.get("open")
+                stock["Previous Day Open (PDO)"] = stock.get("PDO")
                 stock["DHAN_LIVE_VALID"] = bool(q.get("ltp") is not None and float(q.get("ltp") or 0) > 0)
         except (TypeError, ValueError):
             pass
@@ -976,6 +988,7 @@ def trend_check(state):
                 "risk_amount": actual_risk,
                 "PDH": float(stock["PDH"]),
                 "PDL": float(stock["PDL"]), "PDC": float(stock.get("PDC", 0)),
+                "Today's Open": float(today_open), "Previous Day Open (PDO)": float(pdo),
                 "SL": sl, "target": target,
                 "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S IST")
             })
@@ -1102,6 +1115,8 @@ def trend_check(state):
                 _row["PDH"] = _rng[0]
             if _row.get("PDL") in (None, ""):
                 _row["PDL"] = _rng[1]
+            if _row.get("PDO") in (None, ""):
+                _row["PDO"] = _rng[2]
     market["entry_diagnostics"] = entry_diagnostics
     persist_trades(runtime)
     return market, runtime["trades"]
@@ -1170,6 +1185,8 @@ def trade_df(items):
             # 1D trend snapshot: latest completed PDC versus the previous
             # completed PDC. Reference only; it does not change trade entry.
             "1D % at Entry":t.get("1D %", t.get("trend_1d", "—")),
+            "Today's Open":t.get("Today's Open", t.get("today_open", "—")),
+            "Previous Day Open (PDO)":t.get("Previous Day Open (PDO)", t.get("PDO", "—")),
             "Entry Time":t.get("entry_time","—"),"Entry":t.get("entry_price"),
             "Qty":t.get("quantity"),"Capital Used":capital(t),
             "SL":t.get("SL"),"Target":t.get("target"),
@@ -1404,7 +1421,7 @@ def show_set(title,rows,icon):
         if not rows:
             st.caption("No stocks in this set."); return
         df=pd.DataFrame(rows)
-        preferred=["Symbol","Company","Sector","Trend","LTP","1Y Return %","6M Return %","1M Return %","1W Return %","1D Return %","PDH","PDL"]
+        preferred=["Symbol","Company","Sector","Trend","LTP","Today's Open","Previous Day Open (PDO)","1Y Return %","6M Return %","1M Return %","1W Return %","1D Return %","PDH","PDL","PDC"]
         cols=[x for x in preferred if x in df.columns]
         st.dataframe(df[cols] if cols else df,use_container_width=True,hide_index=True)
 
@@ -1477,6 +1494,8 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
             row_pdc = None
         pdh = row.get("PDH", row.get("pdh"))
         pdl = row.get("PDL", row.get("pdl"))
+        pdo = row.get("PDO", row.get("pdo"))
+        today_open = q.get("open")
         # Final fallback for the stock sets/classified state. This fills any
         # symbol whose NSE range source was temporarily unavailable.
         if pdh in (None, "") or pdl in (None, ""):
@@ -1500,6 +1519,8 @@ with st.expander(f"📋 Full NIFTY 500 Live Data ({len(dashboard_universe_rows)}
             "Sector": row.get("Sector", row.get("Industry", "")),
             "SecurityId": sid,
             "PDC": row_pdc,
+            "Previous Day Open (PDO)": pdo,
+            "Today's Open": today_open,
             "PDH": pdh,
             "PDL": pdl,
             "LTP": live_ltp,
