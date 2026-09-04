@@ -75,6 +75,34 @@ class DhanExecutionClient:
     def cancel_super_order_entry(self, order_id):
         return self.request("DELETE", f"/super/orders/{order_id}/ENTRY_LEG")
 
+    def cancel_super_order_all_legs(self, order_id):
+        # Best-effort emergency cancellation before flattening a partial fill.
+        results = []
+        for leg in ("ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"):
+            try:
+                results.append(self.request("DELETE", f"/super/orders/{order_id}/{leg}"))
+            except Exception:
+                pass
+        return results
+
+    def emergency_flatten(self, sid, side, quantity, cid):
+        if int(quantity) <= 0:
+            return {"status": "NO_FILL"}
+        reverse = "SELL" if str(side).upper() == "BUY" else "BUY"
+        return self.request("POST", "/orders", {
+            "dhanClientId": self.client_id,
+            "correlationId": f"{cid}-FLAT"[:30],
+            "transactionType": reverse,
+            "exchangeSegment": "NSE_EQ",
+            "productType": "INTRADAY",
+            "orderType": "MARKET",
+            "securityId": str(int(sid)),
+            "quantity": int(quantity),
+            "price": 0,
+            "validity": "DAY",
+            "afterMarketOrder": False,
+        })
+
     def place_super_order(self,sid,side,quantity,entry,target,stop,cid,owned_ids):
         if force_exit_due(): raise LiveSafetyError("Force-exit time reached")
         if not in_entry_window(): raise LiveSafetyError("Outside entry window")
@@ -113,12 +141,24 @@ class DhanExecutionClient:
                     last=o; status=str(o.get("orderStatus","")).upper()
                     if status in terminal: raise LiveSafetyError(f"Order ended {status}: {o}")
                     filled=int(o.get("filledQty",0) or 0)
-                    if status=="TRADED" and filled>0: return o
+                    if status=="TRADED" and filled>0:
+                        return o
+                    if status=="PART_TRADED" and filled>0:
+                        self.cancel_super_order_all_legs(order_id)
+                        sid = o.get("securityId")
+                        side = o.get("transactionType")
+                        cid = str(o.get("correlationId") or f"S1-PART-{order_id}")
+                        self.emergency_flatten(sid, side, filled, cid)
+                        raise LiveSafetyError("Partial fill was emergency-flattened; no trade recorded")
             time.sleep(1)
         if last and str(last.get("orderStatus","")).upper() in {"PENDING","TRANSIT","PART_TRADED"}:
-            # Do not leave an entry order working after our confirmation timeout.
-            try: self.cancel_super_order_entry(order_id)
-            except Exception: pass
+            try:
+                self.cancel_super_order_all_legs(order_id)
+                filled=int(last.get("filledQty",0) or 0)
+                if filled>0:
+                    self.emergency_flatten(last.get("securityId"), last.get("transactionType"), filled, str(last.get("correlationId") or f"S1-PART-{order_id}"))
+            except Exception:
+                pass
         raise LiveSafetyError(f"Entry was not fully filled and confirmed within {timeout_seconds}s")
 
     def exit_all_intraday_safely(self,owned_ids):
