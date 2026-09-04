@@ -67,10 +67,24 @@ class DhanExecutionClient:
         # Fail closed: never silently bypass the purchased static proxy.
         self.session.trust_env=False
     def request(self,method,path,payload=None,allow_not_found=False):
-        r=self.session.request(method,API+path,headers=self.headers,json=payload,timeout=12,proxies=self.proxies)
+        # Use one explicit HTTPS CONNECT proxy path for every Dhan request.
+        # The proxy URL is built once from the supplied provider credentials;
+        # no request may fall back to the Streamlit runtime IP.
+        try:
+            r=self.session.request(
+                method,
+                API+path,
+                headers=self.headers,
+                json=payload,
+                timeout=(10,30),
+                proxies=self.proxies,
+            )
+        except requests.RequestException as exc:
+            raise LiveSafetyError(f"Dhan {method} {path} proxy request failed: {exc}") from exc
         if allow_not_found and r.status_code == 404:
             return None
-        if r.status_code>=400: raise LiveSafetyError(f"Dhan {method} {path} failed {r.status_code}: {r.text[:300]}")
+        if r.status_code>=400:
+            raise LiveSafetyError(f"Dhan {method} {path} failed {r.status_code}: {r.text[:300]}")
         return r.json() if r.text.strip() else {}
     def profile(self):
         x=self.request("GET","/profile")
